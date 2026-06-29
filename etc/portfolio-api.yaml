@@ -1,0 +1,33 @@
+Name: portfolio-api
+Host: 0.0.0.0
+Port: 8888
+
+# Timeout in milliseconds for requests.
+Timeout: 30000
+
+# CORS: frontend origin(s) allowed to call this API with credentials.
+CorsOrigins:
+  - http://localhost:3000
+
+# PostgreSQL connection string (libpq / pgx URL form).
+# Example: postgresql://user:pass@host:5432/db?sslmode=require
+DatabaseURL: ${DATABASE_URL}
+
+# Public site URL. Used to decide whether the session cookie should be Secure.
+SiteURL: ${NEXT_PUBLIC_SITE_URL}
+
+# Outbound webhook for contact submissions (optional).
+ContactWebhookURL: ${CONTACT_WEBHOOK_URL}
+ContactWebhookSecret: ${CONTACT_WEBHOOK_SECRET}
+
+# Static bearer tokens (optional).
+AdminApiToken: ${ADMIN_API_TOKEN}
+InternalApiToken: ${INTERNAL_API_TOKEN}
+
+# AI provider config (optional).
+AiProvider: ${AI_PROVIDER}
+AiApiKey: ${AI_API_KEY}
+
+Log:
+  ServiceName: portfolio-api
+  Level: info

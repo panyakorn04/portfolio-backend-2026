@@ -1,0 +1,21 @@
+run:
+  timeout: 5m
+
+linters:
+  enable:
+    - errcheck
+    - govet
+    - ineffassign
+    - staticcheck
+    - unused
+    - gofmt
+    - goimports
+    - misspell
+    - unconvert
+
+issues:
+  exclude-rules:
+    # Generated/boilerplate noise is not worth failing CI over.
+    - path: cmd/createuser/main.go
+      linters:
+        - errcheck

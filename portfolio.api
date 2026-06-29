@@ -1,0 +1,127 @@
+syntax = "v1"
+
+info (
+	title:   "Portfolio API"
+	desc:    "REST backend for the portfolio site, ported from the Next.js server layer."
+	author:  "Panyakorn Boonyong"
+	version: "0.1.0"
+)
+
+// NOTE: This spec documents the routes for goctl regeneration reference.
+// The hand-written handlers in internal/handler are the source of truth and
+// already implement the response envelopes ({ ok, data } / { ok, error }).
+
+type (
+	ContactRequest {
+		Name    string `json:"name"`
+		Email   string `json:"email"`
+		Company string `json:"company,optional"`
+		Subject string `json:"subject"`
+		Message string `json:"message"`
+		Locale  string `json:"locale,optional"`
+	}
+
+	LoginRequest {
+		Email    string `json:"email"`
+		Password string `json:"password"`
+	}
+
+	UpdateInquiryRequest {
+		Status       string `json:"status"`
+		InternalNote string `json:"internalNote,optional"`
+	}
+
+	UpdateUserRoleRequest {
+		Role string `json:"role"`
+	}
+
+	InquiryIDRequest {
+		InquiryID string `json:"inquiryId"`
+	}
+)
+
+@server (
+	group: public
+)
+service portfolio-api {
+	@handler health
+	get /api/health
+
+	@handler contact
+	post /api/contact (ContactRequest)
+
+	@handler articles
+	get /api/articles
+
+	@handler articleBySlug
+	get /api/articles/:slug
+}
+
+@server (
+	group: admin
+)
+service portfolio-api {
+	@handler sessionStatus
+	get /api/admin/session
+
+	@handler sessionLogin
+	post /api/admin/session (LoginRequest)
+
+	@handler sessionLogout
+	delete /api/admin/session
+
+	@handler listInquiries
+	get /api/admin/contact-inquiries
+
+	@handler getInquiry
+	get /api/admin/contact-inquiries/:id
+
+	@handler updateInquiry
+	patch /api/admin/contact-inquiries/:id (UpdateInquiryRequest)
+
+	@handler listSessions
+	get /api/admin/sessions
+
+	@handler logoutEverywhere
+	delete /api/admin/sessions
+
+	@handler revokeSession
+	delete /api/admin/sessions/:id
+
+	@handler listUsers
+	get /api/admin/users
+
+	@handler updateUserRole
+	patch /api/admin/users/:id (UpdateUserRoleRequest)
+
+	@handler listArticles
+	get /api/admin/articles
+
+	@handler createArticle
+	post /api/admin/articles
+
+	@handler getArticle
+	get /api/admin/articles/:id
+
+	@handler updateArticle
+	patch /api/admin/articles/:id
+
+	@handler deleteArticle
+	delete /api/admin/articles/:id
+}
+
+@server (
+	group: ai
+)
+service portfolio-api {
+	@handler contactSummary
+	post /api/ai/contact-summary (InquiryIDRequest)
+}
+
+@server (
+	group: jobs
+)
+service portfolio-api {
+	@handler contactFollowUp
+	post /api/jobs/contact-follow-up (InquiryIDRequest)
+}

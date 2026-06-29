@@ -1,0 +1,24 @@
+# Build artifacts
+/portfolio-api
+/portfolio-backend
+*.exe
+
+# Env & secrets
+.env
+.env.local
+.env.*.local
+
+# Git / CI
+.git
+.github
+.gitignore
+
+# Docs & local-only files
+README.md
+*.md
+docker-compose.yml
+
+# Editor
+.idea/
+.vscode/
+.DS_Store

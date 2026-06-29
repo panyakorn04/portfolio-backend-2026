@@ -1,0 +1,19 @@
+# Binaries
+/portfolio-backend
+/portfolio-api
+*.exe
+
+# Env
+.env
+.env.local
+.env.*.local
+
+# Go
+/vendor/
+*.test
+*.out
+
+# Editor
+.idea/
+.vscode/
+.DS_Store
