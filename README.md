@@ -92,7 +92,7 @@ The image is a multi-stage build (static `CGO_ENABLED=0` binary on Alpine,
 runs as a non-root user). Pass all config via environment variables — the
 config file resolves `${ENV}` placeholders at startup.
 
-## Continuous integration
+## Continuous integration and deployment
 
 `.github/workflows/ci.yml` runs on pushes and PRs to `main`:
 
@@ -100,7 +100,80 @@ config file resolves `${ENV}` placeholders at startup.
   then applies the migration against a Postgres service and smoke-tests
   `cmd/createuser`.
 - **golangci-lint** — static analysis (config in `.golangci.yml`).
-- **docker** — builds the Docker image (with GHA layer caching).
+- **docker** — builds the Docker image (with GHA layer caching). On pushes to
+  `main` and manual dispatches, it also publishes the image to GHCR as:
+  - `ghcr.io/panyakorn04/portfolio-backend-2026:latest`
+  - `ghcr.io/panyakorn04/portfolio-backend-2026:<commit-sha>`
+- **deploy** — after the image is published on `main`, or when manually
+  dispatched from `main`, SSHes into the VPS and restarts the `backend` Docker
+  Compose service from `/opt/apps`.
+
+Production deploy target:
+
+- VPS: `76.13.185.117`
+- App path: `/opt/apps`
+- Backend Compose service: `backend`
+- Caddy route: `http://76.13.185.117/api/`
+- Postgres host from the app network: `postgres:5432`
+- Redis host from the app network: `redis:6379`
+
+Required GitHub Actions secrets:
+
+- `VPS_HOST` — `76.13.185.117`.
+- `VPS_USER` — SSH user on the VPS, for example `deploy`.
+- `VPS_SSH_KEY` — private key allowed to SSH into the VPS.
+- `BACKEND_IMAGE` — `ghcr.io/panyakorn04/portfolio-backend-2026:latest`.
+- `GHCR_USERNAME` — optional for public GHCR packages, required if the VPS must
+  authenticate to pull the private image.
+- `GHCR_TOKEN` — optional for public GHCR packages, required if the VPS must
+  authenticate to pull the private image. Use a GitHub PAT with `read:packages`.
+
+The VPS Compose file should use the GHCR image for the backend service. This API
+listens on port `8888`, so expose `8888` to the Compose network and point Caddy
+at `backend:8888`:
+
+```yaml
+backend:
+  image: ghcr.io/panyakorn04/portfolio-backend-2026:latest
+  container_name: backend
+  restart: unless-stopped
+  environment:
+    DATABASE_URL: postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}?sslmode=disable
+    REDIS_URL: redis://redis:6379
+    NEXT_PUBLIC_SITE_URL: ${NEXT_PUBLIC_SITE_URL}
+    CONTACT_WEBHOOK_URL: ${CONTACT_WEBHOOK_URL}
+    CONTACT_WEBHOOK_SECRET: ${CONTACT_WEBHOOK_SECRET}
+    ADMIN_API_TOKEN: ${ADMIN_API_TOKEN}
+    INTERNAL_API_TOKEN: ${INTERNAL_API_TOKEN}
+    AI_PROVIDER: ${AI_PROVIDER:-stub}
+    AI_API_KEY: ${AI_API_KEY}
+  expose:
+    - "8888"
+  depends_on:
+    - postgres
+    - redis
+```
+
+```caddy
+:80 {
+  handle_path /api/* {
+    reverse_proxy backend:8888
+  }
+
+  handle {
+    reverse_proxy frontend:80
+  }
+}
+```
+
+The deploy job runs:
+
+```bash
+cd /opt/apps
+BACKEND_IMAGE="$BACKEND_IMAGE" docker compose pull backend
+BACKEND_IMAGE="$BACKEND_IMAGE" docker compose up -d backend
+docker image prune -f
+```
 
 ## Endpoints
 
