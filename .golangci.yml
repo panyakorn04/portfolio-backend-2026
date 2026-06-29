@@ -19,3 +19,9 @@ issues:
     - path: cmd/createuser/main.go
       linters:
         - errcheck
+    # go-zero config uses json tag options such as `optional`, which are parsed
+    # by go-zero but reported as unknown by staticcheck's encoding/json check.
+    - path: internal/config/config.go
+      linters:
+        - staticcheck
+      text: "SA5008:"

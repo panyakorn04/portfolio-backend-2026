@@ -165,7 +165,6 @@ func buildArticleWhere(in ListArticlesInput) (string, []any) {
 				WHERE t."articleId" = a."id" AND t."title" ILIKE $%d))`,
 			idx, idx, idx))
 		args = append(args, like)
-		idx++
 	}
 
 	if len(clauses) == 0 {

@@ -150,7 +150,6 @@ func buildInquiryWhere(in ListInquiriesInput) (string, []any) {
 			`("name" ILIKE $%d OR "email" ILIKE $%d OR "company" ILIKE $%d OR "subject" ILIKE $%d OR "message" ILIKE $%d)`,
 			idx, idx, idx, idx, idx))
 		args = append(args, like)
-		idx++
 	}
 
 	if len(clauses) == 0 {
