@@ -13,15 +13,17 @@ type ServiceContext struct {
 	Config config.Config
 	DB     *sql.DB
 
-	Users      *model.UserModel
-	Sessions   *model.AuthSessionModel
-	Inquiries  *model.ContactInquiryModel
-	Articles   *model.ArticleModel
-	HasDatabse bool
+	Users            *model.UserModel
+	Sessions         *model.AuthSessionModel
+	Inquiries        *model.ContactInquiryModel
+	Articles         *model.ArticleModel
+	SupabaseArticles *model.SupabaseArticleClient
+	HasDatabse       bool
 }
 
 func NewServiceContext(c config.Config) (*ServiceContext, error) {
 	svc := &ServiceContext{Config: c}
+	svc.SupabaseArticles = model.NewSupabaseArticleClient(c.SupabaseURL, c.SupabasePublishableKey)
 
 	if c.DatabaseURL == "" {
 		return svc, nil

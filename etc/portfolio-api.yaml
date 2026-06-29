@@ -16,6 +16,10 @@ DatabaseURL: ${DATABASE_URL}
 # Public site URL. Used to decide whether the session cookie should be Secure.
 SiteURL: ${NEXT_PUBLIC_SITE_URL}
 
+# Optional Supabase REST source for public article reads.
+SupabaseURL: ${NEXT_PUBLIC_SUPABASE_URL}
+SupabasePublishableKey: ${NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY}
+
 # Outbound webhook for contact submissions (optional).
 ContactWebhookURL: ${CONTACT_WEBHOOK_URL}
 ContactWebhookSecret: ${CONTACT_WEBHOOK_SECRET}

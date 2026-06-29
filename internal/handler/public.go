@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"portfolio-backend/internal/logic"
+	"portfolio-backend/internal/model"
 	"portfolio-backend/internal/response"
 	"portfolio-backend/internal/svc"
 )
@@ -102,10 +103,6 @@ func parsePublicLocale(value string) (string, bool) {
 
 func ArticlesHandler(svcCtx *svc.ServiceContext) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		if !requireDatabase(w, svcCtx) {
-			return
-		}
-
 		locale, ok := parsePublicLocale(r.URL.Query().Get("lang"))
 		if !ok {
 			response.Error(w, http.StatusBadRequest, "Unsupported locale.",
@@ -124,7 +121,16 @@ func ArticlesHandler(svcCtx *svc.ServiceContext) http.HandlerFunc {
 			limit = &n
 		}
 
-		articles, err := svcCtx.Articles.ListPublished(r.Context(), limit)
+		var articles []model.Article
+		var err error
+		if svcCtx.SupabaseArticles != nil {
+			articles, err = svcCtx.SupabaseArticles.ListPublished(r.Context(), limit)
+		} else {
+			if !requireDatabase(w, svcCtx) {
+				return
+			}
+			articles, err = svcCtx.Articles.ListPublished(r.Context(), limit)
+		}
 		if err != nil {
 			response.Error(w, http.StatusInternalServerError, "Unable to load articles.")
 			return
@@ -139,7 +145,12 @@ func ArticlesHandler(svcCtx *svc.ServiceContext) http.HandlerFunc {
 
 		total := len(items)
 		if limit != nil {
-			all, err := svcCtx.Articles.ListPublished(r.Context(), nil)
+			var all []model.Article
+			if svcCtx.SupabaseArticles != nil {
+				all, err = svcCtx.SupabaseArticles.ListPublished(r.Context(), nil)
+			} else {
+				all, err = svcCtx.Articles.ListPublished(r.Context(), nil)
+			}
 			if err == nil {
 				total = 0
 				for i := range all {
@@ -160,10 +171,6 @@ func ArticlesHandler(svcCtx *svc.ServiceContext) http.HandlerFunc {
 
 func ArticleBySlugHandler(svcCtx *svc.ServiceContext) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		if !requireDatabase(w, svcCtx) {
-			return
-		}
-
 		locale, ok := parsePublicLocale(r.URL.Query().Get("lang"))
 		if !ok {
 			response.Error(w, http.StatusBadRequest, "Unsupported locale.",
@@ -172,7 +179,16 @@ func ArticleBySlugHandler(svcCtx *svc.ServiceContext) http.HandlerFunc {
 		}
 
 		slug := strings.TrimSpace(pathParam(r, "slug"))
-		article, err := svcCtx.Articles.FindPublishedBySlug(r.Context(), slug)
+		var article *model.Article
+		var err error
+		if svcCtx.SupabaseArticles != nil {
+			article, err = svcCtx.SupabaseArticles.FindPublishedBySlug(r.Context(), slug)
+		} else {
+			if !requireDatabase(w, svcCtx) {
+				return
+			}
+			article, err = svcCtx.Articles.FindPublishedBySlug(r.Context(), slug)
+		}
 		if err != nil {
 			response.Error(w, http.StatusInternalServerError, "Unable to load article.")
 			return
