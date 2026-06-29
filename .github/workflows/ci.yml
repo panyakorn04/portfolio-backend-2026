@@ -142,7 +142,7 @@ jobs:
       - name: Deploy backend service
         uses: appleboy/ssh-action@v1.0.3
         env:
-          BACKEND_IMAGE: ${{ secrets.BACKEND_IMAGE }}
+          BACKEND_IMAGE: ${{ secrets.BACKEND_IMAGE || env.IMAGE_NAME }}
           GHCR_USERNAME: ${{ secrets.GHCR_USERNAME }}
           GHCR_TOKEN: ${{ secrets.GHCR_TOKEN }}
         with:

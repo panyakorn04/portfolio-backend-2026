@@ -115,7 +115,6 @@ Production deploy target:
 - Backend Compose service: `backend`
 - Caddy route: `http://76.13.185.117/api/`
 - Postgres host from the app network: `postgres:5432`
-- Redis host from the app network: `redis:6379`
 
 Required GitHub Actions secrets:
 
@@ -130,16 +129,16 @@ Required GitHub Actions secrets:
 
 The VPS Compose file should use the GHCR image for the backend service. This API
 listens on port `8888`, so expose `8888` to the Compose network and point Caddy
-at `backend:8888`:
+at `backend:8888`. To let the deploy workflow override the image, use
+`${BACKEND_IMAGE}` with the GHCR image as the default:
 
 ```yaml
 backend:
-  image: ghcr.io/panyakorn04/portfolio-backend-2026:latest
+  image: ${BACKEND_IMAGE:-ghcr.io/panyakorn04/portfolio-backend-2026:latest}
   container_name: backend
   restart: unless-stopped
   environment:
     DATABASE_URL: postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}?sslmode=disable
-    REDIS_URL: redis://redis:6379
     NEXT_PUBLIC_SITE_URL: ${NEXT_PUBLIC_SITE_URL}
     CONTACT_WEBHOOK_URL: ${CONTACT_WEBHOOK_URL}
     CONTACT_WEBHOOK_SECRET: ${CONTACT_WEBHOOK_SECRET}
@@ -151,12 +150,11 @@ backend:
     - "8888"
   depends_on:
     - postgres
-    - redis
 ```
 
 ```caddy
 :80 {
-  handle_path /api/* {
+  handle /api/* {
     reverse_proxy backend:8888
   }
 
