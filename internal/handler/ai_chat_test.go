@@ -6,6 +6,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"portfolio-backend/internal/config"
 	"portfolio-backend/internal/model"
@@ -98,6 +99,37 @@ func TestAiChatHandlerForwardsToOllama(t *testing.T) {
 func TestAiChatHandlerRejectsInvalidMessages(t *testing.T) {
 	svcCtx := &svc.ServiceContext{Ollama: model.NewOllamaClient("http://127.0.0.1:1", "panyakorn-local:latest")}
 	req := httptest.NewRequest(http.MethodPost, "/api/ai/chat", strings.NewReader(`{"messages":[{"role":"tool","content":"no"}]}`))
+	rec := httptest.NewRecorder()
+
+	AiChatHandler(svcCtx).ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, body = %s", rec.Code, rec.Body.String())
+	}
+}
+
+func TestAIChatRateLimiterAllowsWithinWindow(t *testing.T) {
+	limiter := newAIChatRateLimiter(2, time.Minute)
+	now := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
+
+	if !limiter.allow("client", now) {
+		t.Fatal("first request should be allowed")
+	}
+	if !limiter.allow("client", now.Add(time.Second)) {
+		t.Fatal("second request should be allowed")
+	}
+	if limiter.allow("client", now.Add(2*time.Second)) {
+		t.Fatal("third request in the same window should be rejected")
+	}
+	if !limiter.allow("client", now.Add(2*time.Minute)) {
+		t.Fatal("request after the window should be allowed")
+	}
+}
+
+func TestAiChatHandlerRejectsOversizedBody(t *testing.T) {
+	svcCtx := &svc.ServiceContext{Ollama: model.NewOllamaClient("http://127.0.0.1:1", "panyakorn-local:latest")}
+	body := `{"messages":[{"role":"user","content":"` + strings.Repeat("x", maxAIChatBodyBytes) + `"}]}`
+	req := httptest.NewRequest(http.MethodPost, "/api/ai/chat", strings.NewReader(body))
 	rec := httptest.NewRecorder()
 
 	AiChatHandler(svcCtx).ServeHTTP(rec, req)

@@ -1,8 +1,10 @@
 package handler
 
 import (
+	"log"
 	"net/http"
 	"strings"
+	"time"
 
 	"portfolio-backend/internal/model"
 	"portfolio-backend/internal/response"
@@ -12,7 +14,11 @@ import (
 const (
 	maxAIChatMessages      = 20
 	maxAIChatContentLength = 4000
+	maxAIChatBodyBytes     = 64 * 1024
+	aiChatRequestsPerHour  = 30
 )
+
+var aiChatLimiter = newAIChatRateLimiter(aiChatRequestsPerHour, time.Hour)
 
 type aiChatRequest struct {
 	Messages []model.OllamaChatMessage `json:"messages"`
@@ -32,6 +38,14 @@ type aiChatUsage struct {
 
 func AiChatHandler(svcCtx *svc.ServiceContext) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
+		clientKey := aiChatClientKey(r)
+		if !aiChatLimiter.allow(clientKey, time.Now()) {
+			response.Error(w, http.StatusTooManyRequests, "Too many AI chat requests. Please try again later.")
+			return
+		}
+
+		r.Body = http.MaxBytesReader(w, r.Body, maxAIChatBodyBytes)
+
 		var body aiChatRequest
 		if !decodeJSON(w, r, &body) {
 			return
@@ -44,6 +58,7 @@ func AiChatHandler(svcCtx *svc.ServiceContext) http.HandlerFunc {
 
 		chat, err := svcCtx.Ollama.Chat(r.Context(), body.Messages)
 		if err != nil {
+			log.Printf("ai chat ollama error: %v", err)
 			response.Error(w, http.StatusBadGateway, "Unable to get a response from the AI model.")
 			return
 		}

@@ -2,8 +2,9 @@ Name: portfolio-api
 Host: 0.0.0.0
 Port: 8888
 
-# Timeout in milliseconds for requests.
-Timeout: 30000
+# Timeout in milliseconds for requests. Local Ollama inference can take longer
+# than normal CRUD handlers, so keep this aligned with the Ollama client timeout.
+Timeout: 120000
 
 # CORS: frontend origin(s) allowed to call this API with credentials.
 CorsOrigins:

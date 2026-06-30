@@ -141,6 +141,8 @@ Repository variables:
 - `ARTICLE_CACHE_TTL_SECONDS`
 - `CONTACT_WEBHOOK_URL`
 - `AI_PROVIDER`
+- `OLLAMA_BASE_URL`
+- `OLLAMA_MODEL`
 
 Repository secrets:
 
@@ -196,9 +198,24 @@ backend:
     INTERNAL_API_TOKEN: ${INTERNAL_API_TOKEN}
     AI_PROVIDER: ${AI_PROVIDER:-stub}
     AI_API_KEY: ${AI_API_KEY}
+    OLLAMA_BASE_URL: ${OLLAMA_BASE_URL:-http://ollama:11434}
+    OLLAMA_MODEL: ${OLLAMA_MODEL:-panyakorn-local:latest}
   expose:
     - "8888"
 ```
+
+AI chat endpoint:
+
+```bash
+curl -sS https://api.panyakorn.com/api/ai/chat \
+  -H 'Content-Type: application/json' \
+  -d '{"messages":[{"role":"user","content":"ตอบเป็นภาษาไทยสั้น ๆ ว่าพร้อมใช้งานไหม"}]}'
+```
+
+The endpoint forwards to the internal Ollama service configured by
+`OLLAMA_BASE_URL`/`OLLAMA_MODEL`, caps request bodies/messages, and applies a
+small in-memory per-client rate limit so the local VPS model cannot be hammered
+unboundedly. Keep Ollama internal-only; do not publish port `11434`.
 
 ```caddy
 :80 {
