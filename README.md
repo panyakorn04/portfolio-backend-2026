@@ -122,8 +122,38 @@ config file resolves `${ENV}` placeholders at startup.
   - `ghcr.io/panyakorn04/portfolio-backend-2026:latest`
   - `ghcr.io/panyakorn04/portfolio-backend-2026:<commit-sha>`
 - **deploy** — after the image is published on `main`, or when manually
-  dispatched from `main`, SSHes into the VPS and restarts the `backend` Docker
-  Compose service from `/opt/apps`.
+  dispatched from `main`, SSHes into the VPS, syncs app env from GitHub
+  repository variables/secrets into `/opt/apps/.env`, then restarts the
+  `backend` Docker Compose service from `/opt/apps`.
+
+### GitHub-managed app env
+
+Runtime app env is managed from GitHub repository settings:
+
+- Variables: `Settings > Secrets and variables > Actions > Variables`
+- Secrets: `Settings > Secrets and variables > Actions > Secrets`
+
+Repository variables:
+
+- `NEXT_PUBLIC_SUPABASE_URL`
+- `NEXT_PUBLIC_SITE_URL`
+- `REDIS_URL`
+- `ARTICLE_CACHE_TTL_SECONDS`
+- `CONTACT_WEBHOOK_URL`
+- `AI_PROVIDER`
+
+Repository secrets:
+
+- `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY`
+- `SUPABASE_SERVICE_ROLE_KEY`
+- `CONTACT_WEBHOOK_SECRET`
+- `ADMIN_API_TOKEN`
+- `INTERNAL_API_TOKEN`
+- `AI_API_KEY`
+
+During deploy, GitHub values are primary. If a value is empty in GitHub, the
+workflow preserves the existing value already present in `/opt/apps/.env` so a
+partial GitHub setup does not wipe production secrets.
 
 Production deploy target:
 
