@@ -1,6 +1,7 @@
 package handler
 
 import (
+	"context"
 	"net/http"
 	"strconv"
 	"strings"
@@ -18,8 +19,18 @@ func HealthHandler(svcCtx *svc.ServiceContext) http.HandlerFunc {
 			Configured bool `json:"configured"`
 			Reachable  bool `json:"reachable"`
 		}
+		type redisStatus struct {
+			Configured bool `json:"configured"`
+			Reachable  bool `json:"reachable"`
+		}
 
 		supabase := supabaseStatus{Configured: svcCtx.HasDatabse, Reachable: svcCtx.HasDatabse}
+		redisCache := redisStatus{Configured: svcCtx.ArticleCache.Enabled()}
+		if redisCache.Configured {
+			ctx, cancel := context.WithTimeout(r.Context(), 200*time.Millisecond)
+			redisCache.Reachable = svcCtx.ArticleCache.Ping(ctx) == nil
+			cancel()
+		}
 
 		status := "ok"
 		if !supabase.Configured {
@@ -36,11 +47,12 @@ func HealthHandler(svcCtx *svc.ServiceContext) http.HandlerFunc {
 			"status":    status,
 			"timestamp": time.Now().UTC().Format(time.RFC3339),
 			"capabilities": map[string]any{
-				"supabase":         supabase,
-				"webhook":          svcCtx.Config.ContactWebhookURL != "",
-				"adminApiToken":    svcCtx.Config.AdminApiToken != "",
-				"internalApiToken": svcCtx.Config.InternalApiToken != "",
-				"aiProvider":       aiProvider,
+				"supabase":          supabase,
+				"redisArticleCache": redisCache,
+				"webhook":           svcCtx.Config.ContactWebhookURL != "",
+				"adminApiToken":     svcCtx.Config.AdminApiToken != "",
+				"internalApiToken":  svcCtx.Config.InternalApiToken != "",
+				"aiProvider":        aiProvider,
 			},
 		})
 	}
@@ -112,6 +124,12 @@ func ArticlesHandler(svcCtx *svc.ServiceContext) http.HandlerFunc {
 			limit = &n
 		}
 
+		cacheKey := articleListCacheKey(locale, limit)
+		if body, ok := svcCtx.ArticleCache.Get(r.Context(), cacheKey); ok {
+			writeCachedJSON(w, body)
+			return
+		}
+
 		var articles []model.Article
 		var err error
 		if svcCtx.SupabaseArticles != nil {
@@ -152,11 +170,22 @@ func ArticlesHandler(svcCtx *svc.ServiceContext) http.HandlerFunc {
 			}
 		}
 
-		response.Ok(w, http.StatusOK, map[string]any{
+		payload := map[string]any{
 			"locale": locale,
 			"total":  total,
 			"items":  items,
-		})
+		}
+		body, err := response.MarshalOk(payload)
+		if err != nil {
+			response.Ok(w, http.StatusOK, payload)
+			return
+		}
+		if svcCtx.ArticleCache.Enabled() {
+			svcCtx.ArticleCache.Set(r.Context(), cacheKey, body)
+			writeFreshJSON(w, body)
+			return
+		}
+		response.WriteJSONBytes(w, http.StatusOK, body)
 	}
 }
 
@@ -170,6 +199,12 @@ func ArticleBySlugHandler(svcCtx *svc.ServiceContext) http.HandlerFunc {
 		}
 
 		slug := strings.TrimSpace(pathParam(r, "slug"))
+		cacheKey := articleDetailCacheKey(locale, slug)
+		if body, ok := svcCtx.ArticleCache.Get(r.Context(), cacheKey); ok {
+			writeCachedJSON(w, body)
+			return
+		}
+
 		var article *model.Article
 		var err error
 		if svcCtx.SupabaseArticles != nil {
@@ -195,6 +230,16 @@ func ArticleBySlugHandler(svcCtx *svc.ServiceContext) http.HandlerFunc {
 			return
 		}
 
-		response.Ok(w, http.StatusOK, detail)
+		body, err := response.MarshalOk(detail)
+		if err != nil {
+			response.Ok(w, http.StatusOK, detail)
+			return
+		}
+		if svcCtx.ArticleCache.Enabled() {
+			svcCtx.ArticleCache.Set(r.Context(), cacheKey, body)
+			writeFreshJSON(w, body)
+			return
+		}
+		response.WriteJSONBytes(w, http.StatusOK, body)
 	}
 }

@@ -13,6 +13,9 @@ type Config struct {
 	SupabasePublishableKey string `json:",optional"`
 	SupabaseServiceRoleKey string `json:",optional"`
 
+	RedisURL               string `json:",optional"`
+	ArticleCacheTTLSeconds int    `json:",optional"`
+
 	ContactWebhookURL    string `json:",optional"`
 	ContactWebhookSecret string `json:",optional"`
 

@@ -1,6 +1,9 @@
 package svc
 
 import (
+	"time"
+
+	"portfolio-backend/internal/cache"
 	"portfolio-backend/internal/config"
 	"portfolio-backend/internal/model"
 )
@@ -8,7 +11,8 @@ import (
 type ServiceContext struct {
 	Config config.Config
 
-	Supabase *model.SupabaseREST
+	Supabase     *model.SupabaseREST
+	ArticleCache *cache.RedisCache
 
 	Users            *model.UserModel
 	Sessions         *model.AuthSessionModel
@@ -28,6 +32,14 @@ func NewServiceContext(c config.Config) (*ServiceContext, error) {
 
 	svc.Supabase = model.NewSupabaseREST(c.SupabaseURL, key)
 	svc.SupabaseArticles = model.NewSupabaseArticleClient(c.SupabaseURL, key)
+
+	articleCacheTTL := time.Duration(c.ArticleCacheTTLSeconds) * time.Second
+	articleCache, err := cache.NewRedisCache(c.RedisURL, articleCacheTTL)
+	if err != nil {
+		return nil, err
+	}
+	svc.ArticleCache = articleCache
+
 	if svc.Supabase == nil {
 		return svc, nil
 	}
@@ -41,4 +53,8 @@ func NewServiceContext(c config.Config) (*ServiceContext, error) {
 	return svc, nil
 }
 
-func (s *ServiceContext) Close() {}
+func (s *ServiceContext) Close() {
+	if s.ArticleCache != nil {
+		_ = s.ArticleCache.Close()
+	}
+}

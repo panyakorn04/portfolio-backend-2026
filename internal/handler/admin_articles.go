@@ -118,6 +118,7 @@ func AdminCreateArticleHandler(svcCtx *svc.ServiceContext) http.HandlerFunc {
 			response.Error(w, http.StatusInternalServerError, "Unable to create article.")
 			return
 		}
+		svcCtx.ArticleCache.DeletePattern(r.Context(), articleCachePattern)
 		response.Ok(w, http.StatusCreated, article)
 	}
 }
@@ -191,6 +192,7 @@ func AdminUpdateArticleHandler(svcCtx *svc.ServiceContext) http.HandlerFunc {
 			response.Error(w, http.StatusInternalServerError, "Unable to update article.")
 			return
 		}
+		svcCtx.ArticleCache.DeletePattern(r.Context(), articleCachePattern)
 		response.Ok(w, http.StatusOK, article)
 	}
 }
@@ -219,6 +221,7 @@ func AdminDeleteArticleHandler(svcCtx *svc.ServiceContext) http.HandlerFunc {
 			response.Error(w, http.StatusInternalServerError, "Unable to delete article.")
 			return
 		}
+		svcCtx.ArticleCache.DeletePattern(r.Context(), articleCachePattern)
 		response.Ok(w, http.StatusOK, map[string]any{"id": id})
 	}
 }

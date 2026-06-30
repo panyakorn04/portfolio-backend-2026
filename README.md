@@ -9,6 +9,7 @@ and calls this service over HTTP.
 - Go 1.23
 - go-zero `rest` (HTTP API, no zRPC)
 - Supabase REST/PostgREST for all persistence
+- Optional Redis cache for public article GET responses
 - bcrypt password hashing, SHA-256 session-token hashing
 
 ## Layout
@@ -66,6 +67,11 @@ Required Supabase env:
   the publishable key when the service role key is empty, but production should
   provide the service role key from server-side secrets only.
 
+Optional Redis article cache env:
+
+- `REDIS_URL`, for example `redis://localhost:6379/0`. Leave empty to disable.
+- `ARTICLE_CACHE_TTL_SECONDS`, defaults to 300 seconds when unset or invalid.
+
 ## Run
 
 The config file reads `${ENV}` placeholders, so export the env first (e.g. via
@@ -95,6 +101,8 @@ docker run --rm -p 8888:8888 \
   -e NEXT_PUBLIC_SUPABASE_URL="https://your-project.supabase.co" \
   -e NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY="..." \
   -e SUPABASE_SERVICE_ROLE_KEY="..." \
+  -e REDIS_URL="redis://host.docker.internal:6379/0" \
+  -e ARTICLE_CACHE_TTL_SECONDS="300" \
   -e NEXT_PUBLIC_SITE_URL="https://your-domain.com" \
   portfolio-api
 ```
@@ -149,6 +157,8 @@ backend:
     NEXT_PUBLIC_SUPABASE_URL: ${NEXT_PUBLIC_SUPABASE_URL}
     NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY: ${NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY}
     SUPABASE_SERVICE_ROLE_KEY: ${SUPABASE_SERVICE_ROLE_KEY}
+    REDIS_URL: ${REDIS_URL}
+    ARTICLE_CACHE_TTL_SECONDS: ${ARTICLE_CACHE_TTL_SECONDS:-300}
     NEXT_PUBLIC_SITE_URL: ${NEXT_PUBLIC_SITE_URL}
     CONTACT_WEBHOOK_URL: ${CONTACT_WEBHOOK_URL}
     CONTACT_WEBHOOK_SECRET: ${CONTACT_WEBHOOK_SECRET}
@@ -218,6 +228,18 @@ The schema matches the existing Prisma-generated database on Supabase:
 
 `migrations/0001_init.sql` remains as an optional bootstrap script for a brand-new
 Supabase project. Runtime access does not use direct SQL connections.
+
+## Redis article cache
+
+When `REDIS_URL` is set, the public article endpoints cache their full JSON
+success response:
+
+- `GET /api/articles?lang=...&limit=...`
+- `GET /api/articles/:slug?lang=...`
+
+The default TTL is 5 minutes (`ARTICLE_CACHE_TTL_SECONDS=300`). Cache failures are
+non-fatal; the API falls back to Supabase REST. Admin article create/update/delete
+clears `portfolio:articles:*` keys so public pages refresh after edits.
 
 ## Auth notes
 

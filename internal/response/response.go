@@ -1,6 +1,7 @@
 package response
 
 import (
+	"bytes"
 	"encoding/json"
 	"net/http"
 )
@@ -29,6 +30,20 @@ type errorEnvelope struct {
 // Ok writes a success envelope: { ok: true, data }.
 func Ok(w http.ResponseWriter, status int, data any) {
 	writeJSON(w, status, okEnvelope{Ok: true, Data: data})
+}
+
+// MarshalOk returns a JSON success envelope: { ok: true, data }.
+func MarshalOk(data any) ([]byte, error) {
+	var buf bytes.Buffer
+	err := json.NewEncoder(&buf).Encode(okEnvelope{Ok: true, Data: data})
+	return buf.Bytes(), err
+}
+
+// WriteJSONBytes writes a pre-marshaled JSON response body.
+func WriteJSONBytes(w http.ResponseWriter, status int, body []byte) {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(status)
+	_, _ = w.Write(body)
 }
 
 // Error writes an error envelope: { ok: false, error: { message, details } }.

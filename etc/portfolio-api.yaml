@@ -18,6 +18,10 @@ SupabaseURL: ${NEXT_PUBLIC_SUPABASE_URL}
 SupabasePublishableKey: ${NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY}
 SupabaseServiceRoleKey: ${SUPABASE_SERVICE_ROLE_KEY}
 
+# Optional Redis cache for public article GET responses.
+RedisURL: ${REDIS_URL}
+ArticleCacheTTLSeconds: ${ARTICLE_CACHE_TTL_SECONDS}
+
 # Outbound webhook for contact submissions (optional).
 ContactWebhookURL: ${CONTACT_WEBHOOK_URL}
 ContactWebhookSecret: ${CONTACT_WEBHOOK_SECRET}
