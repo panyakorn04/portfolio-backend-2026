@@ -43,6 +43,7 @@ func RegisterHandlers(server *rest.Server, svcCtx *svc.ServiceContext) {
 		{Method: http.MethodDelete, Path: "/api/admin/articles/:id", Handler: AdminDeleteArticleHandler(svcCtx)},
 
 		// AI + jobs
+		{Method: http.MethodPost, Path: "/api/ai/chat", Handler: AiChatHandler(svcCtx)},
 		{Method: http.MethodPost, Path: "/api/ai/contact-summary", Handler: AiContactSummaryHandler(svcCtx)},
 		{Method: http.MethodPost, Path: "/api/jobs/contact-follow-up", Handler: JobsContactFollowUpHandler(svcCtx)},
 	})

@@ -24,4 +24,7 @@ type Config struct {
 
 	AiProvider string `json:",optional"`
 	AiApiKey   string `json:",optional"`
+
+	OllamaBaseURL string `json:",optional"`
+	OllamaModel   string `json:",optional"`
 }
