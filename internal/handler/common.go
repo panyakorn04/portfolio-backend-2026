@@ -31,11 +31,11 @@ func decodeBodyAllowEmpty(r *http.Request, v any) error {
 	return json.NewDecoder(r.Body).Decode(v)
 }
 
-// requireDatabase writes a 503 and returns false when the DB is not configured.
+// requireDatabase writes a 503 and returns false when Supabase REST is not configured.
 func requireDatabase(w http.ResponseWriter, svcCtx *svc.ServiceContext) bool {
 	if !svcCtx.HasDatabse {
 		response.Error(w, http.StatusServiceUnavailable, "Service is not configured yet.",
-			response.ErrorDetail{Field: "DATABASE_URL", Message: "Add a PostgreSQL connection string."})
+			response.ErrorDetail{Field: "NEXT_PUBLIC_SUPABASE_URL", Message: "Add Supabase REST URL and key configuration."})
 		return false
 	}
 	return true

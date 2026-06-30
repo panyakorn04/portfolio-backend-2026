@@ -7,11 +7,11 @@ type Config struct {
 
 	CorsOrigins []string `json:",optional"`
 
-	DatabaseURL string `json:",optional"`
-	SiteURL     string `json:",optional"`
+	SiteURL string `json:",optional"`
 
 	SupabaseURL            string `json:",optional"`
 	SupabasePublishableKey string `json:",optional"`
+	SupabaseServiceRoleKey string `json:",optional"`
 
 	ContactWebhookURL    string `json:",optional"`
 	ContactWebhookSecret string `json:",optional"`

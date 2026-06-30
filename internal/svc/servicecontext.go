@@ -1,17 +1,14 @@
 package svc
 
 import (
-	"database/sql"
-
 	"portfolio-backend/internal/config"
 	"portfolio-backend/internal/model"
-
-	_ "github.com/jackc/pgx/v5/stdlib"
 )
 
 type ServiceContext struct {
 	Config config.Config
-	DB     *sql.DB
+
+	Supabase *model.SupabaseREST
 
 	Users            *model.UserModel
 	Sessions         *model.AuthSessionModel
@@ -23,33 +20,25 @@ type ServiceContext struct {
 
 func NewServiceContext(c config.Config) (*ServiceContext, error) {
 	svc := &ServiceContext{Config: c}
-	svc.SupabaseArticles = model.NewSupabaseArticleClient(c.SupabaseURL, c.SupabasePublishableKey)
 
-	if c.DatabaseURL == "" {
+	key := c.SupabaseServiceRoleKey
+	if key == "" {
+		key = c.SupabasePublishableKey
+	}
+
+	svc.Supabase = model.NewSupabaseREST(c.SupabaseURL, key)
+	svc.SupabaseArticles = model.NewSupabaseArticleClient(c.SupabaseURL, key)
+	if svc.Supabase == nil {
 		return svc, nil
 	}
 
-	db, err := sql.Open("pgx", c.DatabaseURL)
-	if err != nil {
-		return nil, err
-	}
-
-	if err := db.Ping(); err != nil {
-		return nil, err
-	}
-
-	svc.DB = db
 	svc.HasDatabse = true
-	svc.Users = model.NewUserModel(db)
-	svc.Sessions = model.NewAuthSessionModel(db)
-	svc.Inquiries = model.NewContactInquiryModel(db)
-	svc.Articles = model.NewArticleModel(db)
+	svc.Users = model.NewUserModel(svc.Supabase)
+	svc.Sessions = model.NewAuthSessionModel(svc.Supabase)
+	svc.Inquiries = model.NewContactInquiryModel(svc.Supabase)
+	svc.Articles = model.NewArticleModel(svc.Supabase)
 
 	return svc, nil
 }
 
-func (s *ServiceContext) Close() {
-	if s.DB != nil {
-		_ = s.DB.Close()
-	}
-}
+func (s *ServiceContext) Close() {}

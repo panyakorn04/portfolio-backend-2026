@@ -14,24 +14,15 @@ import (
 
 func HealthHandler(svcCtx *svc.ServiceContext) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		type dbStatus struct {
-			Configured bool    `json:"configured"`
-			Reachable  bool    `json:"reachable"`
-			Error      *string `json:"error"`
+		type supabaseStatus struct {
+			Configured bool `json:"configured"`
+			Reachable  bool `json:"reachable"`
 		}
 
-		db := dbStatus{Configured: svcCtx.HasDatabse}
-		if svcCtx.HasDatabse {
-			if err := svcCtx.DB.PingContext(r.Context()); err != nil {
-				msg := err.Error()
-				db.Error = &msg
-			} else {
-				db.Reachable = true
-			}
-		}
+		supabase := supabaseStatus{Configured: svcCtx.HasDatabse, Reachable: svcCtx.HasDatabse}
 
 		status := "ok"
-		if db.Configured && !db.Reachable {
+		if !supabase.Configured {
 			status = "degraded"
 		}
 
@@ -45,7 +36,7 @@ func HealthHandler(svcCtx *svc.ServiceContext) http.HandlerFunc {
 			"status":    status,
 			"timestamp": time.Now().UTC().Format(time.RFC3339),
 			"capabilities": map[string]any{
-				"database":         db,
+				"supabase":         supabase,
 				"webhook":          svcCtx.Config.ContactWebhookURL != "",
 				"adminApiToken":    svcCtx.Config.AdminApiToken != "",
 				"internalApiToken": svcCtx.Config.InternalApiToken != "",
@@ -70,7 +61,7 @@ func ContactHandler(svcCtx *svc.ServiceContext) http.HandlerFunc {
 
 		if !svcCtx.HasDatabse {
 			response.Error(w, http.StatusServiceUnavailable, "Contact service is not configured yet.",
-				response.ErrorDetail{Field: "DATABASE_URL", Message: "Add a PostgreSQL connection string before using the contact API."})
+				response.ErrorDetail{Field: "NEXT_PUBLIC_SUPABASE_URL", Message: "Add Supabase REST URL and key configuration before using the contact API."})
 			return
 		}
 

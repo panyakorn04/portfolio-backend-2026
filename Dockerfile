@@ -32,7 +32,7 @@ USER app
 
 EXPOSE 8888
 
-# Config reads ${ENV} placeholders, so pass env vars at runtime
-# (e.g. DATABASE_URL). See etc/portfolio-api.yaml.
+# Config reads ${ENV} placeholders, so pass Supabase/env vars at runtime.
+# See etc/portfolio-api.yaml.
 ENTRYPOINT ["/app/portfolio-api"]
 CMD ["-f", "etc/portfolio-api.yaml"]

@@ -25,23 +25,6 @@ jobs:
     name: Build and test
     runs-on: ubuntu-latest
 
-    services:
-      postgres:
-        image: postgres:16-alpine
-        env:
-          POSTGRES_USER: portfolio
-          POSTGRES_PASSWORD: portfolio
-          POSTGRES_DB: portfolio
-        ports:
-          - 5432:5432
-        options: >-
-          --health-cmd "pg_isready -U portfolio -d portfolio"
-          --health-interval 5s
-          --health-timeout 5s
-          --health-retries 10
-
-    env:
-      DATABASE_URL: postgresql://portfolio:portfolio@localhost:5432/portfolio?sslmode=disable
 
     steps:
       - name: Checkout repository
@@ -70,15 +53,6 @@ jobs:
 
       - name: Test
         run: go test ./... -race -count=1
-
-      - name: Apply migration
-        run: |
-          psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f migrations/0001_init.sql
-
-      - name: Smoke test create-user
-        run: |
-          go run ./cmd/createuser \
-            -email ci@example.com -password ci-password -role admin -name "CI"
 
   lint:
     name: golangci-lint

@@ -1,10 +1,8 @@
-# Runs the go-zero API against the database configured in .env
-# (the existing Supabase instance).
+# Runs the go-zero API against Supabase REST configured in .env.
 #
 #   docker compose up --build
 #
-# The API reads DATABASE_URL and other settings from .env (gitignored).
-# No local Postgres is started — the schema already lives in Supabase.
+# No local Postgres is started. All persistence goes through Supabase REST.
 
 services:
   api:
@@ -12,8 +10,9 @@ services:
     env_file:
       - .env
     environment:
-      # Allow overriding without editing .env; falls back to .env values.
-      DATABASE_URL: ${DATABASE_URL}
+      NEXT_PUBLIC_SUPABASE_URL: ${NEXT_PUBLIC_SUPABASE_URL}
+      NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY: ${NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY}
+      SUPABASE_SERVICE_ROLE_KEY: ${SUPABASE_SERVICE_ROLE_KEY}
       NEXT_PUBLIC_SITE_URL: ${NEXT_PUBLIC_SITE_URL:-http://localhost:3000}
     ports:
       - "8888:8888"

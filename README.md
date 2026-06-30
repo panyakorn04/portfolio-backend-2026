@@ -8,7 +8,7 @@ and calls this service over HTTP.
 
 - Go 1.23
 - go-zero `rest` (HTTP API, no zRPC)
-- PostgreSQL via `database/sql` + pgx stdlib driver
+- Supabase REST/PostgREST for all persistence
 - bcrypt password hashing, SHA-256 session-token hashing
 
 ## Layout
@@ -17,12 +17,12 @@ and calls this service over HTTP.
 .
 ├── etc/portfolio-api.yaml     # config (reads ${ENV} placeholders)
 ├── portfolio.api              # go-zero API spec (reference for goctl)
-├── migrations/0001_init.sql   # Postgres schema (UUID PKs)
-├── cmd/createuser/            # CLI to create/update a staff user
+├── migrations/0001_init.sql   # optional bootstrap schema for a brand-new Supabase project
+├── cmd/createuser/            # CLI to create/update a staff user via Supabase REST
 ├── internal/
 │   ├── config/                # config struct
-│   ├── svc/                   # service context (DB pool)
-│   ├── model/                 # SQL data access (6 tables)
+│   ├── svc/                   # service context (Supabase REST clients)
+│   ├── model/                 # Supabase REST data access
 │   ├── auth/                  # bcrypt, sessions, bearer, RBAC
 │   ├── logic/                 # business logic (validation, webhook, ai, jobs)
 │   ├── response/              # { ok, data } / { ok, error } envelopes
@@ -45,17 +45,26 @@ export PATH=$PATH:$(go env GOPATH)/bin
 
 ```bash
 cp .env.example .env
-# edit .env with your DATABASE_URL etc.
+# edit .env with your Supabase URL and keys
 
 go mod tidy
 
-# Apply the schema
-psql "$DATABASE_URL" -f migrations/0001_init.sql
+# Optional only for a brand-new Supabase database:
+# apply migrations/0001_init.sql in the Supabase SQL editor.
 
-# Create an admin user
-DATABASE_URL="$DATABASE_URL" go run ./cmd/createuser \
+# Create/update an admin user through Supabase REST
+set -a; source .env; set +a
+go run ./cmd/createuser \
   -email you@example.com -password 'change-me' -role admin -name "You"
 ```
+
+Required Supabase env:
+
+- `NEXT_PUBLIC_SUPABASE_URL`
+- `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY`
+- `SUPABASE_SERVICE_ROLE_KEY` for backend/admin writes. The backend falls back to
+  the publishable key when the service role key is empty, but production should
+  provide the service role key from server-side secrets only.
 
 ## Run
 
@@ -69,11 +78,11 @@ go run . -f etc/portfolio-api.yaml
 
 ## Docker
 
-`docker compose` runs the API against the database configured in `.env`
-(the existing Supabase instance) — it does not start a local Postgres:
+`docker compose` runs the API against Supabase REST configured in `.env`. It does
+not start a local Postgres service:
 
 ```bash
-cp .env.example .env   # set DATABASE_URL to your Supabase connection string
+cp .env.example .env   # set Supabase URL/keys
 docker compose up --build
 # API on http://localhost:8888
 ```
@@ -83,7 +92,9 @@ Build just the API image:
 ```bash
 docker build -t portfolio-api .
 docker run --rm -p 8888:8888 \
-  -e DATABASE_URL="postgresql://user:pass@host:5432/portfolio?sslmode=disable" \
+  -e NEXT_PUBLIC_SUPABASE_URL="https://your-project.supabase.co" \
+  -e NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY="..." \
+  -e SUPABASE_SERVICE_ROLE_KEY="..." \
   -e NEXT_PUBLIC_SITE_URL="https://your-domain.com" \
   portfolio-api
 ```
@@ -96,9 +107,7 @@ config file resolves `${ENV}` placeholders at startup.
 
 `.github/workflows/ci.yml` runs on pushes and PRs to `main`:
 
-- **build-and-test** — `gofmt` check, `go vet`, `go build`, `go test -race`,
-  then applies the migration against a Postgres service and smoke-tests
-  `cmd/createuser`.
+- **build-and-test** — `gofmt` check, `go vet`, `go build`, `go test -race`.
 - **golangci-lint** — static analysis (config in `.golangci.yml`).
 - **docker** — builds the Docker image (with GHA layer caching). On pushes to
   `main` and manual dispatches, it also publishes the image to GHCR as:
@@ -114,7 +123,6 @@ Production deploy target:
 - App path: `/opt/apps`
 - Backend Compose service: `backend`
 - Caddy route: `http://76.13.185.117/api/`
-- Postgres host from the app network: `postgres:5432`
 
 Required GitHub Actions secrets:
 
@@ -138,7 +146,9 @@ backend:
   container_name: backend
   restart: unless-stopped
   environment:
-    DATABASE_URL: postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}?sslmode=disable
+    NEXT_PUBLIC_SUPABASE_URL: ${NEXT_PUBLIC_SUPABASE_URL}
+    NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY: ${NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY}
+    SUPABASE_SERVICE_ROLE_KEY: ${SUPABASE_SERVICE_ROLE_KEY}
     NEXT_PUBLIC_SITE_URL: ${NEXT_PUBLIC_SITE_URL}
     CONTACT_WEBHOOK_URL: ${CONTACT_WEBHOOK_URL}
     CONTACT_WEBHOOK_SECRET: ${CONTACT_WEBHOOK_SECRET}
@@ -148,8 +158,6 @@ backend:
     AI_API_KEY: ${AI_API_KEY}
   expose:
     - "8888"
-  depends_on:
-    - postgres
 ```
 
 ```caddy
@@ -198,27 +206,26 @@ All responses use the shared envelope:
 | POST | `/api/ai/contact-summary` | admin |
 | POST | `/api/jobs/contact-follow-up` | internal bearer |
 
-## Database schema
+## Supabase schema
 
-The schema **matches the existing Prisma-generated database** (e.g. on Supabase)
-so this service runs against the live data with no migration:
+The schema matches the existing Prisma-generated database on Supabase:
 
-- Table names are PascalCase and quoted (`"User"`, `"Article"`, ...).
-- Column names are camelCase and quoted (`"passwordHash"`, `"createdAt"`, ...).
-- IDs are `text` (cuid) with **no DB default** — the app supplies a
-  cuid-compatible ID on insert (see `internal/model/id.go`).
-- Timestamps are `timestamp` (without time zone), as Prisma created them.
+- Table names are PascalCase (`User`, `Article`, ...).
+- Column names are camelCase (`passwordHash`, `createdAt`, ...).
+- IDs are `text` (cuid) with no DB default — the app supplies a cuid-compatible
+  ID on insert (see `internal/model/id.go`).
+- Timestamps are `timestamp`/Supabase-compatible values.
 
-`migrations/0001_init.sql` reproduces this schema for a brand-new database. The
-production database already has these tables (created by Prisma).
+`migrations/0001_init.sql` remains as an optional bootstrap script for a brand-new
+Supabase project. Runtime access does not use direct SQL connections.
 
 ## Auth notes
 
 - **Sessions**: login sets an httpOnly cookie `portfolio_admin_session` holding a
-  random token; the SHA-256 hash is stored in `"AuthSession"`. 7-day expiry.
+  random token; the SHA-256 hash is stored in `AuthSession`. 7-day expiry.
 - **Bearer**: `ADMIN_API_TOKEN` / `INTERNAL_API_TOKEN` bypass role checks.
 - **Passwords**: new users use bcrypt. Existing users created by the original
-  Next.js backend used scrypt (`salt:key` hex) and **keep working** —
+  Next.js backend used scrypt (`salt:key` hex) and keep working —
   `VerifyPassword` accepts both formats, so no re-hash is required.
 - **CORS**: set `CorsOrigins` in the config to the frontend origin so the cookie
   flow works cross-origin.

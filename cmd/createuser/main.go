@@ -1,13 +1,12 @@
-// Command createuser inserts or updates a staff user with a bcrypt password.
+// Command createuser inserts or updates a staff user with a bcrypt password via Supabase REST.
 //
 // Usage:
 //
-//	DATABASE_URL=... go run ./cmd/createuser -email you@example.com -password secret -role admin -name "Your Name"
+//	NEXT_PUBLIC_SUPABASE_URL=... SUPABASE_SERVICE_ROLE_KEY=... go run ./cmd/createuser -email you@example.com -password secret -role admin -name "Your Name"
 package main
 
 import (
 	"context"
-	"database/sql"
 	"flag"
 	"fmt"
 	"os"
@@ -15,8 +14,6 @@ import (
 
 	"portfolio-backend/internal/auth"
 	"portfolio-backend/internal/model"
-
-	_ "github.com/jackc/pgx/v5/stdlib"
 )
 
 func main() {
@@ -35,18 +32,16 @@ func main() {
 		os.Exit(1)
 	}
 
-	dsn := os.Getenv("DATABASE_URL")
-	if dsn == "" {
-		fmt.Fprintln(os.Stderr, "DATABASE_URL is required")
+	baseURL := os.Getenv("NEXT_PUBLIC_SUPABASE_URL")
+	key := os.Getenv("SUPABASE_SERVICE_ROLE_KEY")
+	if key == "" {
+		key = os.Getenv("NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY")
+	}
+	api := model.NewSupabaseREST(baseURL, key)
+	if api == nil {
+		fmt.Fprintln(os.Stderr, "NEXT_PUBLIC_SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY are required")
 		os.Exit(1)
 	}
-
-	db, err := sql.Open("pgx", dsn)
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "open db: %v\n", err)
-		os.Exit(1)
-	}
-	defer db.Close()
 
 	hash, err := auth.HashPassword(*password)
 	if err != nil {
@@ -59,20 +54,12 @@ func main() {
 		namePtr = name
 	}
 
-	const query = `INSERT INTO "User" ("id", "email", "name", "passwordHash", "role", "updatedAt")
-		VALUES ($1, $2, $3, $4, $5, now())
-		ON CONFLICT ("email") DO UPDATE
-		SET "name" = EXCLUDED."name", "passwordHash" = EXCLUDED."passwordHash",
-		    "role" = EXCLUDED."role", "updatedAt" = now()
-		RETURNING "id"`
-
-	var id string
-	err = db.QueryRowContext(context.Background(), query,
-		model.GenerateID(), strings.ToLower(*email), namePtr, hash, *role).Scan(&id)
+	userModel := model.NewUserModel(api)
+	user, err := userModel.UpsertStaffUser(context.Background(), strings.ToLower(*email), namePtr, hash, *role)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "upsert user: %v\n", err)
 		os.Exit(1)
 	}
 
-	fmt.Printf("user %s ready (id=%s, role=%s)\n", *email, id, *role)
+	fmt.Printf("user %s ready (id=%s, role=%s)\n", user.Email, user.ID, user.Role)
 }
