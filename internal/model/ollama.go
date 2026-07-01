@@ -1,6 +1,7 @@
 package model
 
 import (
+	"bufio"
 	"bytes"
 	"context"
 	"encoding/json"
@@ -170,6 +171,29 @@ func (c *OllamaClient) Chat(ctx context.Context, messages []OllamaChatMessage) (
 	return &out, nil
 }
 
+func (c *OllamaClient) ChatStream(ctx context.Context, messages []OllamaChatMessage, onChunk func(OllamaChatResponse) error) error {
+	if c == nil {
+		return fmt.Errorf("ollama client is not configured")
+	}
+	if onChunk == nil {
+		return fmt.Errorf("ollama stream callback is required")
+	}
+
+	payload := OllamaChatRequest{
+		Model:    c.Model(),
+		Messages: messages,
+		Stream:   true,
+	}
+
+	return c.doStreamJSON(ctx, http.MethodPost, "/api/chat", payload, func(line []byte) error {
+		var chunk OllamaChatResponse
+		if err := json.Unmarshal(line, &chunk); err != nil {
+			return err
+		}
+		return onChunk(chunk)
+	})
+}
+
 func (c *OllamaClient) Generate(ctx context.Context, req OllamaGenerateRequest) (*OllamaGenerateResponse, error) {
 	if req.Model == "" {
 		req.Model = c.Model()
@@ -229,6 +253,50 @@ func (c *OllamaClient) Version(ctx context.Context) (*OllamaVersionResponse, err
 		return nil, err
 	}
 	return &out, nil
+}
+
+func (c *OllamaClient) doStreamJSON(ctx context.Context, method, path string, in any, onLine func([]byte) error) error {
+	if c == nil {
+		return fmt.Errorf("ollama client is not configured")
+	}
+
+	payload, err := json.Marshal(in)
+	if err != nil {
+		return err
+	}
+
+	req, err := http.NewRequestWithContext(ctx, method, c.baseURL+path, bytes.NewReader(payload))
+	if err != nil {
+		return err
+	}
+	req.Header.Set("Content-Type", "application/json")
+
+	resp, err := c.httpClient.Do(req)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		respBody, readErr := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
+		if readErr != nil {
+			return readErr
+		}
+		return fmt.Errorf("ollama returned %d: %s", resp.StatusCode, strings.TrimSpace(string(respBody)))
+	}
+
+	scanner := bufio.NewScanner(resp.Body)
+	scanner.Buffer(make([]byte, 0, 64*1024), 1024*1024)
+	for scanner.Scan() {
+		line := bytes.TrimSpace(scanner.Bytes())
+		if len(line) == 0 {
+			continue
+		}
+		if err := onLine(append([]byte(nil), line...)); err != nil {
+			return err
+		}
+	}
+	return scanner.Err()
 }
 
 func (c *OllamaClient) doJSON(ctx context.Context, method, path string, in any, out any) error {

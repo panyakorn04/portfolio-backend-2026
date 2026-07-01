@@ -48,6 +48,12 @@ type (
 		Messages []AIChatMessage `json:"messages"`
 	}
 
+	AIChatStreamRequest {
+		ThreadID string          `json:"threadId,optional"`
+		RunID    string          `json:"runId,optional"`
+		Messages []AIChatMessage `json:"messages"`
+	}
+
 	AIGenerateRequest {
 		Model  string `json:"model,optional"`
 		Prompt string `json:"prompt"`
@@ -140,6 +146,9 @@ service portfolio-api {
 service portfolio-api {
 	@handler aiChat
 	post /api/ai/chat (AIChatRequest)
+
+	@handler aiChatStream
+	post /api/ai/chat/stream (AIChatStreamRequest)
 
 	@handler aiGenerate
 	post /api/ai/generate (AIGenerateRequest)

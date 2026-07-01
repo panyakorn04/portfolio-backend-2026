@@ -1,6 +1,7 @@
 package handler
 
 import (
+	"bufio"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -93,6 +94,73 @@ func TestAiChatHandlerForwardsToOllama(t *testing.T) {
 	}
 	if !body.Ok || body.Data.Message.Content != "พร้อมใช้งานครับ" || body.Data.Usage.EvalCount != 7 {
 		t.Fatalf("unexpected response: %#v", body)
+	}
+}
+
+func TestAiChatStreamHandlerForwardsOllamaStreamAsSSE(t *testing.T) {
+	var got model.OllamaChatRequest
+	ollama := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/api/chat" {
+			t.Fatalf("unexpected path %s", r.URL.Path)
+		}
+		if err := json.NewDecoder(r.Body).Decode(&got); err != nil {
+			t.Fatalf("decode ollama request: %v", err)
+		}
+		w.Header().Set("Content-Type", "application/x-ndjson")
+		_, _ = w.Write([]byte(`{"model":"panyakorn-local:latest","message":{"role":"assistant","content":"API "},"done":false}` + "\n"))
+		_, _ = w.Write([]byte(`{"model":"panyakorn-local:latest","message":{"role":"assistant","content":"OK"},"done":true,"prompt_eval_count":5,"eval_count":2}` + "\n"))
+	}))
+	defer ollama.Close()
+
+	svcCtx := &svc.ServiceContext{
+		Config: config.Config{OllamaBaseURL: ollama.URL, OllamaModel: "panyakorn-local:latest"},
+		Ollama: model.NewOllamaClient(ollama.URL, "panyakorn-local:latest"),
+	}
+
+	req := httptest.NewRequest(http.MethodPost, "/api/ai/chat/stream", strings.NewReader(`{"threadId":"thread-test","runId":"run-test","messages":[{"role":"user","content":"ping"}]}`))
+	rec := httptest.NewRecorder()
+
+	AiChatStreamHandler(svcCtx).ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, body = %s", rec.Code, rec.Body.String())
+	}
+	if contentType := rec.Header().Get("Content-Type"); !strings.Contains(contentType, "text/event-stream") {
+		t.Fatalf("content-type = %q", contentType)
+	}
+	if !got.Stream {
+		t.Fatal("ollama stream should be true")
+	}
+
+	var eventTypes []string
+	var deltas []string
+	scanner := bufio.NewScanner(strings.NewReader(rec.Body.String()))
+	for scanner.Scan() {
+		line := scanner.Text()
+		if !strings.HasPrefix(line, "data: ") {
+			continue
+		}
+		var event map[string]any
+		if err := json.Unmarshal([]byte(strings.TrimPrefix(line, "data: ")), &event); err != nil {
+			t.Fatalf("decode SSE event %q: %v", line, err)
+		}
+		eventTypes = append(eventTypes, event["type"].(string))
+		if delta, ok := event["delta"].(string); ok {
+			deltas = append(deltas, delta)
+		}
+	}
+	if err := scanner.Err(); err != nil {
+		t.Fatalf("scan SSE: %v", err)
+	}
+
+	joinedTypes := strings.Join(eventTypes, ",")
+	for _, want := range []string{"RUN_STARTED", "TEXT_MESSAGE_START", "TEXT_MESSAGE_CONTENT", "TEXT_MESSAGE_END", "RUN_FINISHED"} {
+		if !strings.Contains(joinedTypes, want) {
+			t.Fatalf("missing event %s in %v; body=%s", want, eventTypes, rec.Body.String())
+		}
+	}
+	if strings.Join(deltas, "") != "API OK" {
+		t.Fatalf("deltas = %#v", deltas)
 	}
 }
 

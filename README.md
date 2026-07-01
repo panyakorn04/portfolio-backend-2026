@@ -207,10 +207,15 @@ backend:
 AI adapter endpoints:
 
 ```bash
-# Chat with message history. Frontend AI console uses this endpoint today.
+# Chat with message history. Returns the shared JSON envelope.
 curl -sS https://api.panyakorn.com/api/ai/chat \
   -H 'Content-Type: application/json' \
   -d '{"messages":[{"role":"user","content":"ตอบเป็นภาษาไทยสั้น ๆ ว่าพร้อมใช้งานไหม"}]}'
+
+# Streaming chat for TanStack AI / AG-UI clients. Returns text/event-stream.
+curl -N https://api.panyakorn.com/api/ai/chat/stream \
+  -H 'Content-Type: application/json' \
+  -d '{"threadId":"thread-demo","runId":"run-demo","messages":[{"role":"user","content":"ตอบสั้น ๆ ว่า API OK"}]}'
 
 # One-shot text generation through Ollama /api/generate.
 curl -sS https://api.panyakorn.com/api/ai/generate \
@@ -240,9 +245,10 @@ curl -sS https://api.panyakorn.com/api/ai/embed \
 
 These endpoints keep the backend as the adapter boundary: the frontend calls the
 backend, and the backend forwards to the internal Ollama service configured by
-`OLLAMA_BASE_URL`/`OLLAMA_MODEL`. Chat and generate force non-streaming responses
-for now so the current frontend can consume normal JSON envelopes. The chat
-endpoint caps request bodies/messages and applies a small in-memory per-client
+`OLLAMA_BASE_URL`/`OLLAMA_MODEL`. `/api/ai/chat` returns the normal JSON
+envelope, while `/api/ai/chat/stream` converts Ollama's newline-delimited
+stream into AG-UI-compatible `text/event-stream` chunks for TanStack AI clients.
+Chat/generate caps request bodies/messages and applies a small in-memory per-client
 rate limit so the local VPS model cannot be hammered unboundedly. Keep Ollama
 internal-only; do not publish port `11434`.
 
@@ -290,6 +296,7 @@ All responses use the shared envelope:
 | GET/POST | `/api/admin/articles` | admin (POST: admin/editor) |
 | GET/PATCH/DELETE | `/api/admin/articles/:id` | admin (write: admin/editor) |
 | POST | `/api/ai/chat` | public |
+| POST | `/api/ai/chat/stream` | public |
 | POST | `/api/ai/generate` | public, default model only |
 | POST | `/api/ai/embed` | admin |
 | GET | `/api/ai/models` | admin |
