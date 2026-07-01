@@ -123,20 +123,26 @@ func AiChatStreamHandler(svcCtx *svc.ServiceContext) http.HandlerFunc {
 		w.Header().Set("Cache-Control", "no-cache, no-transform")
 		w.Header().Set("Connection", "keep-alive")
 
-		writeAIStreamEvent(w, flusher, map[string]any{
+		if err := writeAIStreamEvent(w, flusher, map[string]any{
 			"type":      "RUN_STARTED",
 			"timestamp": time.Now().UnixMilli(),
 			"threadId":  body.ThreadID,
 			"runId":     body.RunID,
 			"model":     modelName,
-		})
-		writeAIStreamEvent(w, flusher, map[string]any{
+		}); err != nil {
+			log.Printf("ai chat stream write error: %v", err)
+			return
+		}
+		if err := writeAIStreamEvent(w, flusher, map[string]any{
 			"type":      "TEXT_MESSAGE_START",
 			"timestamp": time.Now().UnixMilli(),
 			"messageId": messageID,
 			"role":      "assistant",
 			"model":     modelName,
-		})
+		}); err != nil {
+			log.Printf("ai chat stream write error: %v", err)
+			return
+		}
 
 		var finalChunk model.OllamaChatResponse
 		err := svcCtx.Ollama.ChatStream(r.Context(), body.Messages, func(chunk model.OllamaChatResponse) error {
@@ -144,14 +150,16 @@ func AiChatStreamHandler(svcCtx *svc.ServiceContext) http.HandlerFunc {
 				modelName = chunk.Model
 			}
 			if chunk.Message != nil && chunk.Message.Content != "" {
-				writeAIStreamEvent(w, flusher, map[string]any{
+				if err := writeAIStreamEvent(w, flusher, map[string]any{
 					"type":      "TEXT_MESSAGE_CONTENT",
 					"timestamp": time.Now().UnixMilli(),
 					"messageId": messageID,
 					"delta":     chunk.Message.Content,
 					"content":   chunk.Message.Content,
 					"model":     modelName,
-				})
+				}); err != nil {
+					return err
+				}
 			}
 			if chunk.Done {
 				finalChunk = chunk
@@ -160,7 +168,7 @@ func AiChatStreamHandler(svcCtx *svc.ServiceContext) http.HandlerFunc {
 		})
 		if err != nil {
 			log.Printf("ai chat stream ollama error: %v", err)
-			writeAIStreamEvent(w, flusher, map[string]any{
+			_ = writeAIStreamEvent(w, flusher, map[string]any{
 				"type":      "RUN_ERROR",
 				"timestamp": time.Now().UnixMilli(),
 				"threadId":  body.ThreadID,
@@ -172,13 +180,16 @@ func AiChatStreamHandler(svcCtx *svc.ServiceContext) http.HandlerFunc {
 			return
 		}
 
-		writeAIStreamEvent(w, flusher, map[string]any{
+		if err := writeAIStreamEvent(w, flusher, map[string]any{
 			"type":      "TEXT_MESSAGE_END",
 			"timestamp": time.Now().UnixMilli(),
 			"messageId": messageID,
 			"model":     modelName,
-		})
-		writeAIStreamEvent(w, flusher, map[string]any{
+		}); err != nil {
+			log.Printf("ai chat stream write error: %v", err)
+			return
+		}
+		if err := writeAIStreamEvent(w, flusher, map[string]any{
 			"type":         "RUN_FINISHED",
 			"timestamp":    time.Now().UnixMilli(),
 			"threadId":     body.ThreadID,
@@ -189,17 +200,23 @@ func AiChatStreamHandler(svcCtx *svc.ServiceContext) http.HandlerFunc {
 				"promptTokens":     finalChunk.PromptEvalCount,
 				"completionTokens": finalChunk.EvalCount,
 			},
-		})
+		}); err != nil {
+			log.Printf("ai chat stream write error: %v", err)
+			return
+		}
 	}
 }
 
-func writeAIStreamEvent(w http.ResponseWriter, flusher http.Flusher, event map[string]any) {
+func writeAIStreamEvent(w http.ResponseWriter, flusher http.Flusher, event map[string]any) error {
 	payload, err := json.Marshal(event)
 	if err != nil {
-		return
+		return err
 	}
-	_, _ = fmt.Fprintf(w, "data: %s\n\n", payload)
+	if _, err := fmt.Fprintf(w, "data: %s\n\n", payload); err != nil {
+		return err
+	}
 	flusher.Flush()
+	return nil
 }
 
 func validateAIChatMessages(messages []model.OllamaChatMessage) (response.ErrorDetail, bool) {
