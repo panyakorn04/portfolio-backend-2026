@@ -204,18 +204,47 @@ backend:
     - "8888"
 ```
 
-AI chat endpoint:
+AI adapter endpoints:
 
 ```bash
+# Chat with message history. Frontend AI console uses this endpoint today.
 curl -sS https://api.panyakorn.com/api/ai/chat \
   -H 'Content-Type: application/json' \
   -d '{"messages":[{"role":"user","content":"ตอบเป็นภาษาไทยสั้น ๆ ว่าพร้อมใช้งานไหม"}]}'
+
+# One-shot text generation through Ollama /api/generate.
+curl -sS https://api.panyakorn.com/api/ai/generate \
+  -H 'Content-Type: application/json' \
+  -d '{"prompt":"สรุปสถานะระบบแบบสั้น"}'
+
+# Admin-only: list local Ollama models / running models / version.
+curl -sS https://api.panyakorn.com/api/ai/models \
+  -H 'Authorization: Bearer YOUR_ADMIN_API_TOKEN'
+curl -sS https://api.panyakorn.com/api/ai/running \
+  -H 'Authorization: Bearer YOUR_ADMIN_API_TOKEN'
+curl -sS https://api.panyakorn.com/api/ai/version \
+  -H 'Authorization: Bearer YOUR_ADMIN_API_TOKEN'
+
+# Admin-only: show model metadata. Empty model defaults to OLLAMA_MODEL.
+curl -sS https://api.panyakorn.com/api/ai/model/show \
+  -H 'Authorization: Bearer YOUR_ADMIN_API_TOKEN' \
+  -H 'Content-Type: application/json' \
+  -d '{}'
+
+# Admin-only: embeddings through Ollama /api/embed. Override model for embedding models.
+curl -sS https://api.panyakorn.com/api/ai/embed \
+  -H 'Authorization: Bearer YOUR_ADMIN_API_TOKEN' \
+  -H 'Content-Type: application/json' \
+  -d '{"model":"nomic-embed-text","input":"ข้อความสำหรับค้นหา"}'
 ```
 
-The endpoint forwards to the internal Ollama service configured by
-`OLLAMA_BASE_URL`/`OLLAMA_MODEL`, caps request bodies/messages, and applies a
-small in-memory per-client rate limit so the local VPS model cannot be hammered
-unboundedly. Keep Ollama internal-only; do not publish port `11434`.
+These endpoints keep the backend as the adapter boundary: the frontend calls the
+backend, and the backend forwards to the internal Ollama service configured by
+`OLLAMA_BASE_URL`/`OLLAMA_MODEL`. Chat and generate force non-streaming responses
+for now so the current frontend can consume normal JSON envelopes. The chat
+endpoint caps request bodies/messages and applies a small in-memory per-client
+rate limit so the local VPS model cannot be hammered unboundedly. Keep Ollama
+internal-only; do not publish port `11434`.
 
 ```caddy
 :80 {
@@ -260,6 +289,13 @@ All responses use the shared envelope:
 | PATCH | `/api/admin/users/:id` | admin |
 | GET/POST | `/api/admin/articles` | admin (POST: admin/editor) |
 | GET/PATCH/DELETE | `/api/admin/articles/:id` | admin (write: admin/editor) |
+| POST | `/api/ai/chat` | public |
+| POST | `/api/ai/generate` | public, default model only |
+| POST | `/api/ai/embed` | admin |
+| GET | `/api/ai/models` | admin |
+| GET | `/api/ai/running` | admin |
+| GET | `/api/ai/version` | admin |
+| POST | `/api/ai/model/show` | admin |
 | POST | `/api/ai/contact-summary` | admin |
 | POST | `/api/jobs/contact-follow-up` | internal bearer |
 

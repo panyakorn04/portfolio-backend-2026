@@ -38,6 +38,30 @@ type (
 	InquiryIDRequest {
 		InquiryID string `json:"inquiryId"`
 	}
+
+	AIChatMessage {
+		Role    string `json:"role"`
+		Content string `json:"content"`
+	}
+
+	AIChatRequest {
+		Messages []AIChatMessage `json:"messages"`
+	}
+
+	AIGenerateRequest {
+		Model  string `json:"model,optional"`
+		Prompt string `json:"prompt"`
+	}
+
+	AIEmbedRequest {
+		Model string `json:"model,optional"`
+		Input string `json:"input"`
+	}
+
+	AIShowModelRequest {
+		Model   string `json:"model,optional"`
+		Verbose bool   `json:"verbose,optional"`
+	}
 )
 
 @server (
@@ -114,6 +138,27 @@ service portfolio-api {
 	group: ai
 )
 service portfolio-api {
+	@handler aiChat
+	post /api/ai/chat (AIChatRequest)
+
+	@handler aiGenerate
+	post /api/ai/generate (AIGenerateRequest)
+
+	@handler aiEmbed
+	post /api/ai/embed (AIEmbedRequest)
+
+	@handler aiModels
+	get /api/ai/models
+
+	@handler aiRunningModels
+	get /api/ai/running
+
+	@handler aiVersion
+	get /api/ai/version
+
+	@handler aiShowModel
+	post /api/ai/model/show (AIShowModelRequest)
+
 	@handler contactSummary
 	post /api/ai/contact-summary (InquiryIDRequest)
 }
