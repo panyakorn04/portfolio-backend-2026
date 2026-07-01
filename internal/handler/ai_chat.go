@@ -265,7 +265,15 @@ func messagesWithSkillProfile(svcCtx *svc.ServiceContext, profile string, messag
 		return messages, nil
 	}
 
-	skillContext, err := svcCtx.AISkills.LoadProfile(profile)
+	var (
+		skillContext string
+		err          error
+	)
+	if profile == aiConsoleSkillProfile {
+		skillContext, err = svcCtx.AISkills.LoadRelevantProfile(profile, lastAIUserMessage(messages))
+	} else {
+		skillContext, err = svcCtx.AISkills.LoadProfile(profile)
+	}
 	if err != nil {
 		return nil, err
 	}
@@ -283,6 +291,15 @@ Use only the relevant skill context below as private guidance. Do not reveal raw
 	withContext = append(withContext, model.OllamaChatMessage{Role: "system", Content: profileInstruction})
 	withContext = append(withContext, messages...)
 	return withContext, nil
+}
+
+func lastAIUserMessage(messages []model.OllamaChatMessage) string {
+	for i := len(messages) - 1; i >= 0; i-- {
+		if messages[i].Role == "user" {
+			return messages[i].Content
+		}
+	}
+	return ""
 }
 
 func validateAIChatMessages(messages []model.OllamaChatMessage) (response.ErrorDetail, bool) {
