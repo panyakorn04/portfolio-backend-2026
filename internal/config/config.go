@@ -27,4 +27,5 @@ type Config struct {
 
 	OllamaBaseURL string `json:",optional"`
 	OllamaModel   string `json:",optional"`
+	AISkillsDir   string `json:",optional"`
 }

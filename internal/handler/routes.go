@@ -45,6 +45,8 @@ func RegisterHandlers(server *rest.Server, svcCtx *svc.ServiceContext) {
 		// AI + jobs
 		{Method: http.MethodPost, Path: "/api/ai/chat", Handler: AiChatHandler(svcCtx)},
 		{Method: http.MethodPost, Path: "/api/ai/chat/stream", Handler: AiChatStreamHandler(svcCtx)},
+		{Method: http.MethodPost, Path: "/api/portfolio/assistant/chat", Handler: PortfolioAssistantChatHandler(svcCtx)},
+		{Method: http.MethodPost, Path: "/api/portfolio/assistant/chat/stream", Handler: PortfolioAssistantChatStreamHandler(svcCtx)},
 		{Method: http.MethodPost, Path: "/api/ai/generate", Handler: AiGenerateHandler(svcCtx)},
 		{Method: http.MethodPost, Path: "/api/ai/embed", Handler: AiEmbedHandler(svcCtx)},
 		{Method: http.MethodGet, Path: "/api/ai/models", Handler: AiModelsHandler(svcCtx)},

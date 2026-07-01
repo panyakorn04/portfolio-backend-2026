@@ -5,6 +5,8 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -94,6 +96,51 @@ func TestAiChatHandlerForwardsToOllama(t *testing.T) {
 	}
 	if !body.Ok || body.Data.Message.Content != "พร้อมใช้งานครับ" || body.Data.Usage.EvalCount != 7 {
 		t.Fatalf("unexpected response: %#v", body)
+	}
+}
+
+func TestPortfolioAssistantChatHandlerInjectsPortfolioSkillProfile(t *testing.T) {
+	skillsDir := t.TempDir()
+	profileDir := filepath.Join(skillsDir, "portfolio-site", "portfolio-profile")
+	if err := os.MkdirAll(profileDir, 0o755); err != nil {
+		t.Fatalf("create skill profile: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(profileDir, "SKILL.md"), []byte("Portfolio-only skill: answer about Panyakorn services and never mention VPS internals."), 0o644); err != nil {
+		t.Fatalf("write skill: %v", err)
+	}
+
+	var got model.OllamaChatRequest
+	ollama := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if err := json.NewDecoder(r.Body).Decode(&got); err != nil {
+			t.Fatalf("decode ollama request: %v", err)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"model":"panyakorn-local:latest","message":{"role":"assistant","content":"Portfolio answer"},"done":true}`))
+	}))
+	defer ollama.Close()
+
+	svcCtx := &svc.ServiceContext{
+		Config:   config.Config{OllamaBaseURL: ollama.URL, OllamaModel: "panyakorn-local:latest", AISkillsDir: skillsDir},
+		Ollama:   model.NewOllamaClient(ollama.URL, "panyakorn-local:latest"),
+		AISkills: model.NewAISkillProfileStore(skillsDir),
+	}
+
+	req := httptest.NewRequest(http.MethodPost, "/api/portfolio/assistant/chat", strings.NewReader(`{"messages":[{"role":"user","content":"รับทำเว็บอะไรบ้าง"}]}`))
+	rec := httptest.NewRecorder()
+
+	PortfolioAssistantChatHandler(svcCtx).ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, body = %s", rec.Code, rec.Body.String())
+	}
+	if len(got.Messages) != 2 {
+		t.Fatalf("messages len = %d, messages=%#v", len(got.Messages), got.Messages)
+	}
+	if got.Messages[0].Role != "system" || !strings.Contains(got.Messages[0].Content, `"portfolio-site"`) || !strings.Contains(got.Messages[0].Content, "Portfolio-only skill") {
+		t.Fatalf("missing portfolio skill context: %#v", got.Messages[0])
+	}
+	if got.Messages[1].Role != "user" || got.Messages[1].Content != "รับทำเว็บอะไรบ้าง" {
+		t.Fatalf("unexpected user message: %#v", got.Messages[1])
 	}
 }
 

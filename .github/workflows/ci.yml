@@ -127,6 +127,7 @@ jobs:
           AI_PROVIDER: ${{ vars.AI_PROVIDER }}
           OLLAMA_BASE_URL: ${{ vars.OLLAMA_BASE_URL }}
           OLLAMA_MODEL: ${{ vars.OLLAMA_MODEL }}
+          AI_SKILLS_DIR: ${{ vars.AI_SKILLS_DIR || '/opt/ai/skills' }}
           NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY: ${{ secrets.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY }}
           SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
           CONTACT_WEBHOOK_SECRET: ${{ secrets.CONTACT_WEBHOOK_SECRET }}
@@ -137,7 +138,7 @@ jobs:
           host: ${{ secrets.VPS_HOST }}
           username: ${{ secrets.VPS_USER }}
           key: ${{ secrets.VPS_SSH_KEY }}
-          envs: BACKEND_IMAGE,GHCR_USERNAME,GHCR_TOKEN,NEXT_PUBLIC_SUPABASE_URL,NEXT_PUBLIC_SITE_URL,REDIS_URL,ARTICLE_CACHE_TTL_SECONDS,CONTACT_WEBHOOK_URL,AI_PROVIDER,OLLAMA_BASE_URL,OLLAMA_MODEL,NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY,SUPABASE_SERVICE_ROLE_KEY,CONTACT_WEBHOOK_SECRET,ADMIN_API_TOKEN,INTERNAL_API_TOKEN,AI_API_KEY
+          envs: BACKEND_IMAGE,GHCR_USERNAME,GHCR_TOKEN,NEXT_PUBLIC_SUPABASE_URL,NEXT_PUBLIC_SITE_URL,REDIS_URL,ARTICLE_CACHE_TTL_SECONDS,CONTACT_WEBHOOK_URL,AI_PROVIDER,OLLAMA_BASE_URL,OLLAMA_MODEL,AI_SKILLS_DIR,NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY,SUPABASE_SERVICE_ROLE_KEY,CONTACT_WEBHOOK_SECRET,ADMIN_API_TOKEN,INTERNAL_API_TOKEN,AI_API_KEY
           script: |
             set -euo pipefail
             cd /opt/apps
@@ -171,6 +172,7 @@ jobs:
                 'AI_API_KEY',
                 'OLLAMA_BASE_URL',
                 'OLLAMA_MODEL',
+                'AI_SKILLS_DIR',
             ]
 
             existing = {}
@@ -217,6 +219,15 @@ jobs:
                 print('WARNING: missing required app env values: ' + ', '.join(missing), flush=True)
             PY
 
-            BACKEND_IMAGE="$BACKEND_IMAGE" docker compose pull backend
-            BACKEND_IMAGE="$BACKEND_IMAGE" docker compose up -d backend
+            cat > docker-compose.ai-skills.yml <<'YAML'
+            services:
+              backend:
+                environment:
+                  AI_SKILLS_DIR: ${AI_SKILLS_DIR:-/opt/ai/skills}
+                volumes:
+                  - ./ai:/opt/ai:ro
+            YAML
+
+            BACKEND_IMAGE="$BACKEND_IMAGE" docker compose -f docker-compose.yml -f docker-compose.ai-skills.yml pull backend
+            BACKEND_IMAGE="$BACKEND_IMAGE" docker compose -f docker-compose.yml -f docker-compose.ai-skills.yml up -d backend
             docker image prune -f

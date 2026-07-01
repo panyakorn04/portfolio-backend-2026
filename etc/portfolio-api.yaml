@@ -39,6 +39,7 @@ AiProvider: ${AI_PROVIDER}
 AiApiKey: ${AI_API_KEY}
 OllamaBaseURL: ${OLLAMA_BASE_URL}
 OllamaModel: ${OLLAMA_MODEL}
+AISkillsDir: ${AI_SKILLS_DIR}
 
 Log:
   ServiceName: portfolio-api

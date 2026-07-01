@@ -150,6 +150,12 @@ service portfolio-api {
 	@handler aiChatStream
 	post /api/ai/chat/stream (AIChatStreamRequest)
 
+	@handler portfolioAssistantChat
+	post /api/portfolio/assistant/chat (AIChatRequest)
+
+	@handler portfolioAssistantChatStream
+	post /api/portfolio/assistant/chat/stream (AIChatStreamRequest)
+
 	@handler aiGenerate
 	post /api/ai/generate (AIGenerateRequest)
 

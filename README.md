@@ -143,6 +143,7 @@ Repository variables:
 - `AI_PROVIDER`
 - `OLLAMA_BASE_URL`
 - `OLLAMA_MODEL`
+- `AI_SKILLS_DIR` — defaults to `/opt/ai/skills`; backend skill-profile root mounted from `custom-ai-skills` assets.
 
 Repository secrets:
 
@@ -200,6 +201,9 @@ backend:
     AI_API_KEY: ${AI_API_KEY}
     OLLAMA_BASE_URL: ${OLLAMA_BASE_URL:-http://ollama:11434}
     OLLAMA_MODEL: ${OLLAMA_MODEL:-panyakorn-local:latest}
+    AI_SKILLS_DIR: ${AI_SKILLS_DIR:-/opt/ai/skills}
+  volumes:
+    - ./ai:/opt/ai:ro
   expose:
     - "8888"
 ```
@@ -216,6 +220,16 @@ curl -sS https://api.panyakorn.com/api/ai/chat \
 curl -N https://api.panyakorn.com/api/ai/chat/stream \
   -H 'Content-Type: application/json' \
   -d '{"threadId":"thread-demo","runId":"run-demo","messages":[{"role":"user","content":"ตอบสั้น ๆ ว่า API OK"}]}'
+
+# Public portfolio-site assistant profile for panyakorn.com visitors.
+curl -sS https://api.panyakorn.com/api/portfolio/assistant/chat \
+  -H 'Content-Type: application/json' \
+  -d '{"messages":[{"role":"user","content":"รับทำเว็บแบบไหนบ้าง"}]}'
+
+# Streaming portfolio-site assistant profile.
+curl -N https://api.panyakorn.com/api/portfolio/assistant/chat/stream \
+  -H 'Content-Type: application/json' \
+  -d '{"threadId":"portfolio-demo","runId":"run-demo","messages":[{"role":"user","content":"สรุปบริการหลัก"}]}'
 
 # One-shot text generation through Ollama /api/generate.
 curl -sS https://api.panyakorn.com/api/ai/generate \
@@ -245,12 +259,14 @@ curl -sS https://api.panyakorn.com/api/ai/embed \
 
 These endpoints keep the backend as the adapter boundary: the frontend calls the
 backend, and the backend forwards to the internal Ollama service configured by
-`OLLAMA_BASE_URL`/`OLLAMA_MODEL`. `/api/ai/chat` returns the normal JSON
-envelope, while `/api/ai/chat/stream` converts Ollama's newline-delimited
-stream into AG-UI-compatible `text/event-stream` chunks for TanStack AI clients.
-Chat/generate caps request bodies/messages and applies a small in-memory per-client
-rate limit so the local VPS model cannot be hammered unboundedly. Keep Ollama
-internal-only; do not publish port `11434`.
+`OLLAMA_BASE_URL`/`OLLAMA_MODEL`. `/api/ai/chat` and `/api/ai/chat/stream`
+inject the `ai-console` skill profile for `ai.panyakorn.com`. `/api/portfolio/assistant/chat`
+and `/api/portfolio/assistant/chat/stream` inject the public-safe `portfolio-site`
+skill profile for `panyakorn.com`. The stream endpoints convert Ollama's
+newline-delimited stream into AG-UI-compatible `text/event-stream` chunks for
+TanStack AI clients. Chat/generate caps request bodies/messages and applies a
+small in-memory per-client rate limit so the local VPS model cannot be hammered
+unboundedly. Keep Ollama internal-only; do not publish port `11434`.
 
 ```caddy
 :80 {
@@ -268,8 +284,8 @@ The deploy job runs:
 
 ```bash
 cd /opt/apps
-BACKEND_IMAGE="$BACKEND_IMAGE" docker compose pull backend
-BACKEND_IMAGE="$BACKEND_IMAGE" docker compose up -d backend
+BACKEND_IMAGE="$BACKEND_IMAGE" docker compose -f docker-compose.yml -f docker-compose.ai-skills.yml pull backend
+BACKEND_IMAGE="$BACKEND_IMAGE" docker compose -f docker-compose.yml -f docker-compose.ai-skills.yml up -d backend
 docker image prune -f
 ```
 
@@ -295,8 +311,10 @@ All responses use the shared envelope:
 | PATCH | `/api/admin/users/:id` | admin |
 | GET/POST | `/api/admin/articles` | admin (POST: admin/editor) |
 | GET/PATCH/DELETE | `/api/admin/articles/:id` | admin (write: admin/editor) |
-| POST | `/api/ai/chat` | public |
-| POST | `/api/ai/chat/stream` | public |
+| POST | `/api/ai/chat` | public, `ai-console` skills |
+| POST | `/api/ai/chat/stream` | public, `ai-console` skills |
+| POST | `/api/portfolio/assistant/chat` | public, `portfolio-site` skills |
+| POST | `/api/portfolio/assistant/chat/stream` | public, `portfolio-site` skills |
 | POST | `/api/ai/generate` | public, default model only |
 | POST | `/api/ai/embed` | admin |
 | GET | `/api/ai/models` | admin |

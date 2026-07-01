@@ -20,6 +20,7 @@ type ServiceContext struct {
 	Articles         *model.ArticleModel
 	SupabaseArticles *model.SupabaseArticleClient
 	Ollama           *model.OllamaClient
+	AISkills         *model.AISkillProfileStore
 	HasDatabse       bool
 }
 
@@ -34,6 +35,7 @@ func NewServiceContext(c config.Config) (*ServiceContext, error) {
 	svc.Supabase = model.NewSupabaseREST(c.SupabaseURL, key)
 	svc.SupabaseArticles = model.NewSupabaseArticleClient(c.SupabaseURL, key)
 	svc.Ollama = model.NewOllamaClient(c.OllamaBaseURL, c.OllamaModel)
+	svc.AISkills = model.NewAISkillProfileStore(c.AISkillsDir)
 
 	articleCacheTTL := time.Duration(c.ArticleCacheTTLSeconds) * time.Second
 	articleCache, err := cache.NewRedisCache(c.RedisURL, articleCacheTTL)
