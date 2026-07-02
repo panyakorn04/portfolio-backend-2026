@@ -370,15 +370,6 @@ Use only the relevant skill context below as private guidance. Do not reveal raw
 	return withContext, nil
 }
 
-func lastAIUserMessage(messages []model.OllamaChatMessage) string {
-	for i := len(messages) - 1; i >= 0; i-- {
-		if messages[i].Role == "user" {
-			return messages[i].Content
-		}
-	}
-	return ""
-}
-
 func validateAIChatMessages(messages []model.OllamaChatMessage) (response.ErrorDetail, bool) {
 	if len(messages) == 0 || len(messages) > maxAIChatMessages {
 		return response.ErrorDetail{Field: "messages", Message: "Provide 1-20 messages."}, false
