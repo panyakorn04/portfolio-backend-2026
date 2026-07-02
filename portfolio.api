@@ -49,9 +49,11 @@ type (
 	}
 
 	AIChatStreamRequest {
-		ThreadID string          `json:"threadId,optional"`
-		RunID    string          `json:"runId,optional"`
-		Messages []AIChatMessage `json:"messages"`
+		SessionID string          `json:"sessionId,optional"`
+		ThreadID  string          `json:"threadId,optional"`
+		RunID     string          `json:"runId,optional"`
+		Message   AIChatMessage   `json:"message,optional"`
+		Messages  []AIChatMessage `json:"messages,optional"`
 	}
 
 	AIGenerateRequest {
@@ -155,6 +157,15 @@ service portfolio-api {
 
 	@handler portfolioAssistantChatStream
 	post /api/portfolio/assistant/chat/stream (AIChatStreamRequest)
+
+	@handler portfolioAssistantCurrentSession
+	get /api/portfolio/assistant/sessions/current
+
+	@handler portfolioAssistantNewSession
+	post /api/portfolio/assistant/sessions
+
+	@handler portfolioAssistantDeleteSession
+	delete /api/portfolio/assistant/sessions/:id
 
 	@handler aiGenerate
 	post /api/ai/generate (AIGenerateRequest)

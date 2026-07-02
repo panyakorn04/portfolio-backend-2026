@@ -28,4 +28,8 @@ type Config struct {
 	OllamaBaseURL string `json:",optional"`
 	OllamaModel   string `json:",optional"`
 	AISkillsDir   string `json:",optional"`
+
+	PortfolioChatVisitorSecret     string `json:",optional"`
+	PortfolioChatSessionTTLHours   int    `json:",optional"`
+	PortfolioChatMaxStoredMessages int    `json:",optional"`
 }

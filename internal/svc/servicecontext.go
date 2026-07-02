@@ -14,14 +14,16 @@ type ServiceContext struct {
 	Supabase     *model.SupabaseREST
 	ArticleCache *cache.RedisCache
 
-	Users            *model.UserModel
-	Sessions         *model.AuthSessionModel
-	Inquiries        *model.ContactInquiryModel
-	Articles         *model.ArticleModel
-	SupabaseArticles *model.SupabaseArticleClient
-	Ollama           *model.OllamaClient
-	AISkills         *model.AISkillProfileStore
-	HasDatabse       bool
+	Users                 *model.UserModel
+	Sessions              *model.AuthSessionModel
+	Inquiries             *model.ContactInquiryModel
+	Articles              *model.ArticleModel
+	SupabaseArticles      *model.SupabaseArticleClient
+	PortfolioChatSessions *model.PortfolioChatSessionModel
+	PortfolioChatMessages *model.PortfolioChatMessageModel
+	Ollama                *model.OllamaClient
+	AISkills              *model.AISkillProfileStore
+	HasDatabse            bool
 }
 
 func NewServiceContext(c config.Config) (*ServiceContext, error) {
@@ -53,6 +55,8 @@ func NewServiceContext(c config.Config) (*ServiceContext, error) {
 	svc.Sessions = model.NewAuthSessionModel(svc.Supabase)
 	svc.Inquiries = model.NewContactInquiryModel(svc.Supabase)
 	svc.Articles = model.NewArticleModel(svc.Supabase)
+	svc.PortfolioChatSessions = model.NewPortfolioChatSessionModel(svc.Supabase)
+	svc.PortfolioChatMessages = model.NewPortfolioChatMessageModel(svc.Supabase)
 
 	return svc, nil
 }

@@ -1,0 +1,240 @@
+package handler
+
+import (
+	"crypto/hmac"
+	"crypto/rand"
+	"crypto/sha256"
+	"encoding/base64"
+	"encoding/hex"
+	"fmt"
+	"log"
+	"net/http"
+	"strings"
+	"time"
+
+	"portfolio-backend/internal/model"
+	"portfolio-backend/internal/response"
+	"portfolio-backend/internal/svc"
+)
+
+const (
+	portfolioVisitorCookieName      = "portfolio_visitor_id"
+	portfolioVisitorCookieMaxAge    = 180 * 24 * 60 * 60
+	defaultPortfolioChatTTLHours    = 90 * 24
+	defaultPortfolioChatMaxMessages = 100
+)
+
+type portfolioChatSessionResponse struct {
+	Session  portfolioChatSessionDTO   `json:"session"`
+	Messages []portfolioChatMessageDTO `json:"messages"`
+}
+
+type portfolioChatSessionDTO struct {
+	ID        string    `json:"id"`
+	ThreadID  string    `json:"threadId"`
+	Locale    string    `json:"locale"`
+	Title     *string   `json:"title"`
+	UpdatedAt time.Time `json:"updatedAt"`
+	ExpiresAt time.Time `json:"expiresAt"`
+}
+
+type portfolioChatMessageDTO struct {
+	ID        string    `json:"id"`
+	Role      string    `json:"role"`
+	Text      string    `json:"text"`
+	CreatedAt time.Time `json:"createdAt"`
+}
+
+func PortfolioAssistantCurrentSessionHandler(svcCtx *svc.ServiceContext) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if !requirePortfolioChatDatabase(w, svcCtx) {
+			return
+		}
+
+		visitorHash, ok := portfolioVisitorHash(w, r, svcCtx)
+		if !ok {
+			response.Error(w, http.StatusServiceUnavailable, "Unable to initialize chat session.")
+			return
+		}
+
+		now := time.Now().UTC()
+		session, err := svcCtx.PortfolioChatSessions.FindLatestActiveByVisitorHash(r.Context(), visitorHash, now)
+		if err != nil {
+			log.Printf("portfolio chat current session lookup error: %v", err)
+			response.Error(w, http.StatusServiceUnavailable, "Unable to load chat session.")
+			return
+		}
+		if session == nil {
+			session, err = createPortfolioChatSession(r, svcCtx, visitorHash)
+			if err != nil {
+				log.Printf("portfolio chat session create error: %v", err)
+				response.Error(w, http.StatusServiceUnavailable, "Unable to create chat session.")
+				return
+			}
+		}
+
+		messages, err := svcCtx.PortfolioChatMessages.ListForSession(r.Context(), session.ID, portfolioChatMaxStoredMessages(svcCtx))
+		if err != nil {
+			log.Printf("portfolio chat messages lookup error: %v", err)
+			response.Error(w, http.StatusServiceUnavailable, "Unable to load chat messages.")
+			return
+		}
+		response.Ok(w, http.StatusOK, portfolioSessionResponse(*session, messages))
+	}
+}
+
+func PortfolioAssistantNewSessionHandler(svcCtx *svc.ServiceContext) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if !requirePortfolioChatDatabase(w, svcCtx) {
+			return
+		}
+
+		visitorHash, ok := portfolioVisitorHash(w, r, svcCtx)
+		if !ok {
+			response.Error(w, http.StatusServiceUnavailable, "Unable to initialize chat session.")
+			return
+		}
+		session, err := createPortfolioChatSession(r, svcCtx, visitorHash)
+		if err != nil {
+			log.Printf("portfolio chat session create error: %v", err)
+			response.Error(w, http.StatusServiceUnavailable, "Unable to create chat session.")
+			return
+		}
+		response.Ok(w, http.StatusCreated, portfolioSessionResponse(*session, nil))
+	}
+}
+
+func PortfolioAssistantDeleteSessionHandler(svcCtx *svc.ServiceContext) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if !requirePortfolioChatDatabase(w, svcCtx) {
+			return
+		}
+
+		visitorHash, ok := portfolioVisitorHash(w, r, svcCtx)
+		if !ok {
+			response.Error(w, http.StatusServiceUnavailable, "Unable to initialize chat session.")
+			return
+		}
+		sessionID := strings.TrimSpace(pathParam(r, "id"))
+		if sessionID == "" {
+			response.Error(w, http.StatusBadRequest, "Session id is required.")
+			return
+		}
+		if err := svcCtx.PortfolioChatSessions.DeleteByIDForVisitorHash(r.Context(), sessionID, visitorHash); err != nil {
+			log.Printf("portfolio chat session delete error: %v", err)
+			response.Error(w, http.StatusServiceUnavailable, "Unable to delete chat session.")
+			return
+		}
+		response.Ok(w, http.StatusOK, map[string]any{"deleted": true})
+	}
+}
+
+func requirePortfolioChatDatabase(w http.ResponseWriter, svcCtx *svc.ServiceContext) bool {
+	if !svcCtx.HasDatabse || svcCtx.PortfolioChatSessions == nil || svcCtx.PortfolioChatMessages == nil {
+		response.Error(w, http.StatusServiceUnavailable, "Portfolio chat sessions are not configured yet.")
+		return false
+	}
+	return true
+}
+
+func createPortfolioChatSession(r *http.Request, svcCtx *svc.ServiceContext, visitorHash string) (*model.PortfolioChatSession, error) {
+	locale := strings.ToLower(strings.TrimSpace(r.URL.Query().Get("locale")))
+	if locale != "th" {
+		locale = "en"
+	}
+	threadID := fmt.Sprintf("portfolio-widget-%d", time.Now().UnixNano())
+	return svcCtx.PortfolioChatSessions.Create(r.Context(), visitorHash, threadID, locale, portfolioChatExpiresAt(svcCtx))
+}
+
+func portfolioSessionResponse(session model.PortfolioChatSession, messages []model.PortfolioChatMessage) portfolioChatSessionResponse {
+	items := make([]portfolioChatMessageDTO, 0, len(messages))
+	for _, message := range messages {
+		items = append(items, portfolioChatMessageDTO{
+			ID:        message.ID,
+			Role:      message.Role,
+			Text:      message.Content,
+			CreatedAt: message.CreatedAt,
+		})
+	}
+	return portfolioChatSessionResponse{
+		Session: portfolioChatSessionDTO{
+			ID:        session.ID,
+			ThreadID:  session.ThreadID,
+			Locale:    session.Locale,
+			Title:     session.Title,
+			UpdatedAt: session.UpdatedAt,
+			ExpiresAt: session.ExpiresAt,
+		},
+		Messages: items,
+	}
+}
+
+func portfolioVisitorHash(w http.ResponseWriter, r *http.Request, svcCtx *svc.ServiceContext) (string, bool) {
+	visitorID := ""
+	if cookie, err := r.Cookie(portfolioVisitorCookieName); err == nil {
+		visitorID = strings.TrimSpace(cookie.Value)
+	}
+	if visitorID == "" {
+		var err error
+		visitorID, err = newPortfolioVisitorID()
+		if err != nil {
+			return "", false
+		}
+		http.SetCookie(w, &http.Cookie{
+			Name:     portfolioVisitorCookieName,
+			Value:    visitorID,
+			Path:     "/",
+			HttpOnly: true,
+			Secure:   shouldSecureCookie(svcCtx),
+			SameSite: http.SameSiteLaxMode,
+			MaxAge:   portfolioVisitorCookieMaxAge,
+		})
+	}
+	return hashPortfolioVisitorID(visitorID, portfolioChatVisitorSecret(svcCtx)), true
+}
+
+func newPortfolioVisitorID() (string, error) {
+	var raw [32]byte
+	if _, err := rand.Read(raw[:]); err != nil {
+		return "", err
+	}
+	return base64.RawURLEncoding.EncodeToString(raw[:]), nil
+}
+
+func hashPortfolioVisitorID(visitorID, secret string) string {
+	mac := hmac.New(sha256.New, []byte(secret))
+	_, _ = mac.Write([]byte(visitorID))
+	return hex.EncodeToString(mac.Sum(nil))
+}
+
+func portfolioChatVisitorSecret(svcCtx *svc.ServiceContext) string {
+	if secret := strings.TrimSpace(svcCtx.Config.PortfolioChatVisitorSecret); secret != "" {
+		return secret
+	}
+	if secret := strings.TrimSpace(svcCtx.Config.SupabaseServiceRoleKey); secret != "" {
+		return secret
+	}
+	if secret := strings.TrimSpace(svcCtx.Config.AdminApiToken); secret != "" {
+		return secret
+	}
+	return "portfolio-chat-development-secret"
+}
+
+func portfolioChatExpiresAt(svcCtx *svc.ServiceContext) time.Time {
+	ttlHours := svcCtx.Config.PortfolioChatSessionTTLHours
+	if ttlHours <= 0 {
+		ttlHours = defaultPortfolioChatTTLHours
+	}
+	return time.Now().UTC().Add(time.Duration(ttlHours) * time.Hour)
+}
+
+func portfolioChatMaxStoredMessages(svcCtx *svc.ServiceContext) int {
+	maxMessages := svcCtx.Config.PortfolioChatMaxStoredMessages
+	if maxMessages <= 0 {
+		maxMessages = defaultPortfolioChatMaxMessages
+	}
+	if maxMessages > 500 {
+		return 500
+	}
+	return maxMessages
+}

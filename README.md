@@ -144,6 +144,8 @@ Repository variables:
 - `OLLAMA_BASE_URL`
 - `OLLAMA_MODEL`
 - `AI_SKILLS_DIR` — defaults to `/opt/ai/skills`; backend skill-profile root mounted from `custom-ai-skills` assets.
+- `PORTFOLIO_CHAT_SESSION_TTL_HOURS` — optional, defaults to `2160` (90 days).
+- `PORTFOLIO_CHAT_MAX_STORED_MESSAGES` — optional, defaults to `100`.
 
 Repository secrets:
 
@@ -153,6 +155,7 @@ Repository secrets:
 - `ADMIN_API_TOKEN`
 - `INTERNAL_API_TOKEN`
 - `AI_API_KEY`
+- `PORTFOLIO_CHAT_VISITOR_SECRET` — optional but recommended; generate with `openssl rand -base64 48`. If empty, the backend derives the HMAC key from server-side secrets.
 
 During deploy, GitHub values are primary. If a value is empty in GitHub, the
 workflow preserves the existing value already present in `/opt/apps/.env` so a
@@ -202,6 +205,9 @@ backend:
     OLLAMA_BASE_URL: ${OLLAMA_BASE_URL:-http://ollama:11434}
     OLLAMA_MODEL: ${OLLAMA_MODEL:-panyakorn-local:latest}
     AI_SKILLS_DIR: ${AI_SKILLS_DIR:-/opt/ai/skills}
+    PORTFOLIO_CHAT_VISITOR_SECRET: ${PORTFOLIO_CHAT_VISITOR_SECRET}
+    PORTFOLIO_CHAT_SESSION_TTL_HOURS: ${PORTFOLIO_CHAT_SESSION_TTL_HOURS:-2160}
+    PORTFOLIO_CHAT_MAX_STORED_MESSAGES: ${PORTFOLIO_CHAT_MAX_STORED_MESSAGES:-100}
   volumes:
     - ./ai:/opt/ai:ro
   expose:
@@ -314,7 +320,10 @@ All responses use the shared envelope:
 | POST | `/api/ai/chat` | public, `ai-console` skills |
 | POST | `/api/ai/chat/stream` | public, `ai-console` skills |
 | POST | `/api/portfolio/assistant/chat` | public, `portfolio-site` skills |
-| POST | `/api/portfolio/assistant/chat/stream` | public, `portfolio-site` skills |
+| POST | `/api/portfolio/assistant/chat/stream` | public, `portfolio-site` skills; can persist by `sessionId` |
+| GET | `/api/portfolio/assistant/sessions/current` | public, anonymous cookie-backed portfolio chat session |
+| POST | `/api/portfolio/assistant/sessions` | public, create a new anonymous portfolio chat session |
+| DELETE | `/api/portfolio/assistant/sessions/:id` | public, delete current visitor-owned portfolio chat session |
 | POST | `/api/ai/generate` | public, default model only |
 | POST | `/api/ai/embed` | admin |
 | GET | `/api/ai/models` | admin |

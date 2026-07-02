@@ -30,9 +30,11 @@ type aiChatRequest struct {
 }
 
 type aiChatStreamRequest struct {
-	ThreadID string                    `json:"threadId"`
-	RunID    string                    `json:"runId"`
-	Messages []model.OllamaChatMessage `json:"messages"`
+	SessionID string                    `json:"sessionId"`
+	ThreadID  string                    `json:"threadId"`
+	RunID     string                    `json:"runId"`
+	Message   *model.OllamaChatMessage  `json:"message"`
+	Messages  []model.OllamaChatMessage `json:"messages"`
 }
 
 type aiChatResponse struct {
@@ -123,8 +125,49 @@ func aiChatStreamHandlerForProfile(svcCtx *svc.ServiceContext, skillProfile stri
 		if !decodeJSON(w, r, &body) {
 			return
 		}
+		body.SessionID = strings.TrimSpace(body.SessionID)
 		body.ThreadID = strings.TrimSpace(body.ThreadID)
 		body.RunID = strings.TrimSpace(body.RunID)
+		streamMessages := body.Messages
+		var persistedSession *model.PortfolioChatSession
+		var persistedUserMessage *model.OllamaChatMessage
+
+		if skillProfile == portfolioSiteSkillProfile && body.SessionID != "" && body.Message != nil {
+			message := model.OllamaChatMessage{Role: strings.TrimSpace(body.Message.Role), Content: strings.TrimSpace(body.Message.Content)}
+			if errDetail, ok := validateAIChatMessages([]model.OllamaChatMessage{message}); !ok {
+				response.Error(w, http.StatusBadRequest, "Invalid chat request.", errDetail)
+				return
+			}
+			if !requirePortfolioChatDatabase(w, svcCtx) {
+				return
+			}
+			visitorHash, ok := portfolioVisitorHash(w, r, svcCtx)
+			if !ok {
+				response.Error(w, http.StatusServiceUnavailable, "Unable to initialize chat session.")
+				return
+			}
+			session, err := svcCtx.PortfolioChatSessions.FindByIDForVisitorHash(r.Context(), body.SessionID, visitorHash, time.Now().UTC())
+			if err != nil {
+				log.Printf("portfolio chat stream session lookup error: %v", err)
+				response.Error(w, http.StatusServiceUnavailable, "Unable to load chat session.")
+				return
+			}
+			if session == nil {
+				response.Error(w, http.StatusNotFound, "Chat session was not found.")
+				return
+			}
+			storedMessages, err := svcCtx.PortfolioChatMessages.ListForSession(r.Context(), session.ID, maxAIChatMessages-1)
+			if err != nil {
+				log.Printf("portfolio chat stream messages lookup error: %v", err)
+				response.Error(w, http.StatusServiceUnavailable, "Unable to load chat messages.")
+				return
+			}
+			streamMessages = append(portfolioStoredMessagesToOllama(storedMessages), message)
+			body.ThreadID = session.ThreadID
+			persistedSession = session
+			persistedUserMessage = &message
+		}
+
 		if body.ThreadID == "" {
 			body.ThreadID = fmt.Sprintf("thread-%d", time.Now().UnixNano())
 		}
@@ -132,7 +175,7 @@ func aiChatStreamHandlerForProfile(svcCtx *svc.ServiceContext, skillProfile stri
 			body.RunID = fmt.Sprintf("run-%d", time.Now().UnixNano())
 		}
 
-		if errDetail, ok := validateAIChatMessages(body.Messages); !ok {
+		if errDetail, ok := validateAIChatMessages(streamMessages); !ok {
 			response.Error(w, http.StatusBadRequest, "Invalid chat request.", errDetail)
 			return
 		}
@@ -171,7 +214,8 @@ func aiChatStreamHandlerForProfile(svcCtx *svc.ServiceContext, skillProfile stri
 		}
 
 		var finalChunk model.OllamaChatResponse
-		messages, err := messagesWithSkillProfile(svcCtx, skillProfile, body.Messages)
+		var assistantContent strings.Builder
+		messages, err := messagesWithSkillProfile(svcCtx, skillProfile, streamMessages)
 		if err != nil {
 			log.Printf("ai chat stream skill profile error: %v", err)
 			_ = writeAIStreamEvent(w, flusher, map[string]any{
@@ -191,6 +235,7 @@ func aiChatStreamHandlerForProfile(svcCtx *svc.ServiceContext, skillProfile stri
 				modelName = chunk.Model
 			}
 			if chunk.Message != nil && chunk.Message.Content != "" {
+				assistantContent.WriteString(chunk.Message.Content)
 				if err := writeAIStreamEvent(w, flusher, map[string]any{
 					"type":      "TEXT_MESSAGE_CONTENT",
 					"timestamp": time.Now().UnixMilli(),
@@ -245,7 +290,38 @@ func aiChatStreamHandlerForProfile(svcCtx *svc.ServiceContext, skillProfile stri
 			log.Printf("ai chat stream write error: %v", err)
 			return
 		}
+		if persistedSession != nil && persistedUserMessage != nil && assistantContent.Len() > 0 {
+			if err := persistPortfolioChatExchange(r, svcCtx, persistedSession.ID, *persistedUserMessage, assistantContent.String(), modelName); err != nil {
+				log.Printf("portfolio chat persist error: %v", err)
+			}
+		}
 	}
+}
+
+func portfolioStoredMessagesToOllama(messages []model.PortfolioChatMessage) []model.OllamaChatMessage {
+	items := make([]model.OllamaChatMessage, 0, len(messages))
+	for _, message := range messages {
+		role := strings.TrimSpace(message.Role)
+		content := strings.TrimSpace(message.Content)
+		if content == "" || (role != "user" && role != "assistant") {
+			continue
+		}
+		items = append(items, model.OllamaChatMessage{Role: role, Content: content})
+	}
+	return items
+}
+
+func persistPortfolioChatExchange(r *http.Request, svcCtx *svc.ServiceContext, sessionID string, userMessage model.OllamaChatMessage, assistantContent, modelName string) error {
+	if svcCtx.PortfolioChatMessages == nil || svcCtx.PortfolioChatSessions == nil {
+		return nil
+	}
+	if _, err := svcCtx.PortfolioChatMessages.Append(r.Context(), sessionID, "user", strings.TrimSpace(userMessage.Content), map[string]any{"source": "portfolio-widget"}); err != nil {
+		return err
+	}
+	if _, err := svcCtx.PortfolioChatMessages.Append(r.Context(), sessionID, "assistant", strings.TrimSpace(assistantContent), map[string]any{"source": "portfolio-widget", "model": modelName}); err != nil {
+		return err
+	}
+	return svcCtx.PortfolioChatSessions.Touch(r.Context(), sessionID, portfolioChatExpiresAt(svcCtx))
 }
 
 func writeAIStreamEvent(w http.ResponseWriter, flusher http.Flusher, event map[string]any) error {

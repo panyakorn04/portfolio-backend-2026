@@ -37,6 +37,27 @@ type AuthSessionWithUser struct {
 	User      PublicUser
 }
 
+type PortfolioChatSession struct {
+	ID            string    `json:"id"`
+	VisitorIDHash string    `json:"-"`
+	ThreadID      string    `json:"threadId"`
+	Locale        string    `json:"locale"`
+	Title         *string   `json:"title"`
+	CreatedAt     time.Time `json:"createdAt"`
+	UpdatedAt     time.Time `json:"updatedAt"`
+	LastSeenAt    time.Time `json:"lastSeenAt"`
+	ExpiresAt     time.Time `json:"expiresAt"`
+}
+
+type PortfolioChatMessage struct {
+	ID        string         `json:"id"`
+	SessionID string         `json:"sessionId"`
+	Role      string         `json:"role"`
+	Content   string         `json:"content"`
+	CreatedAt time.Time      `json:"createdAt"`
+	Metadata  map[string]any `json:"metadata,omitempty"`
+}
+
 type ContactInquiry struct {
 	ID           string     `json:"id"`
 	Name         string     `json:"name"`
