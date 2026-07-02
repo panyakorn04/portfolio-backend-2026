@@ -44,8 +44,8 @@ AISkillsDir: ${AI_SKILLS_DIR}
 # Public portfolio assistant anonymous backend sessions.
 # Keep the secret backend-only; it is used to HMAC browser visitor ids before DB writes.
 PortfolioChatVisitorSecret: ${PORTFOLIO_CHAT_VISITOR_SECRET}
-PortfolioChatSessionTTLHours: ${PORTFOLIO_CHAT_SESSION_TTL_HOURS}
-PortfolioChatMaxStoredMessages: ${PORTFOLIO_CHAT_MAX_STORED_MESSAGES}
+PortfolioChatSessionTTLHours: 2160
+PortfolioChatMaxStoredMessages: 100
 
 Log:
   ServiceName: portfolio-api
