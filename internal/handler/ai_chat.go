@@ -20,6 +20,7 @@ const (
 	aiChatRequestsPerHour  = 30
 
 	aiConsoleSkillProfile     = "ai-console"
+	aiConsolePrimarySkill     = "anti-hallucination-guardrails"
 	portfolioSiteSkillProfile = "portfolio-site"
 )
 
@@ -346,7 +347,7 @@ func messagesWithSkillProfile(svcCtx *svc.ServiceContext, profile string, messag
 		err          error
 	)
 	if profile == aiConsoleSkillProfile {
-		skillContext, err = svcCtx.AISkills.LoadRelevantProfile(profile, lastAIUserMessage(messages))
+		skillContext, err = svcCtx.AISkills.LoadSkill(profile, aiConsolePrimarySkill)
 	} else {
 		skillContext, err = svcCtx.AISkills.LoadProfile(profile)
 	}

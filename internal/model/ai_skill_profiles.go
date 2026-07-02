@@ -42,6 +42,23 @@ func (s *AISkillProfileStore) LoadProfile(profile string) (string, error) {
 	return buildAISkillContext(skillFiles, len(skillFiles)), nil
 }
 
+func (s *AISkillProfileStore) LoadSkill(profile string, skillName string) (string, error) {
+	if strings.TrimSpace(skillName) == "" || strings.Contains(skillName, "/") || strings.Contains(skillName, "\\") || strings.Contains(skillName, "..") {
+		return "", fmt.Errorf("invalid AI skill name")
+	}
+
+	skillFiles, err := s.profileSkillFiles(profile)
+	if err != nil {
+		return "", err
+	}
+	for _, skill := range skillFiles {
+		if skill.Name == skillName {
+			return buildAISkillContext([]aiSkillFile{skill}, 1), nil
+		}
+	}
+	return "", nil
+}
+
 func (s *AISkillProfileStore) LoadRelevantProfile(profile string, query string) (string, error) {
 	skillFiles, err := s.profileSkillFiles(profile)
 	if err != nil {

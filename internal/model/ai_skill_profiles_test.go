@@ -43,6 +43,24 @@ func TestAISkillProfileStoreLoadRelevantProfileFallsBackToIndex(t *testing.T) {
 	}
 }
 
+func TestAISkillProfileStoreLoadSkillSelectsOnePinnedSkill(t *testing.T) {
+	skillsDir := t.TempDir()
+	writeTestSkill(t, skillsDir, "ai-console", "anti-hallucination-guardrails", "Use for every AI console request.", "GUARDRAIL DETAILS")
+	writeTestSkill(t, skillsDir, "ai-console", "vps-ai-services", "Use when answering VPS and Docker deployment questions.", "VPS DETAILS")
+
+	store := NewAISkillProfileStore(skillsDir)
+	context, err := store.LoadSkill("ai-console", "anti-hallucination-guardrails")
+	if err != nil {
+		t.Fatalf("LoadSkill returned error: %v", err)
+	}
+	if !strings.Contains(context, "GUARDRAIL DETAILS") {
+		t.Fatalf("expected pinned guardrail skill in context: %s", context)
+	}
+	if strings.Contains(context, "VPS DETAILS") {
+		t.Fatalf("did not expect any other skill in pinned context: %s", context)
+	}
+}
+
 func writeTestSkill(t *testing.T, baseDir, profile, skill, description, body string) {
 	t.Helper()
 	dir := filepath.Join(baseDir, profile, skill)

@@ -99,6 +99,46 @@ func TestAiChatHandlerForwardsToOllama(t *testing.T) {
 	}
 }
 
+func TestAiChatHandlerPinsAntiHallucinationGuardrailSkill(t *testing.T) {
+	skillsDir := t.TempDir()
+	writeHandlerTestSkill(t, skillsDir, "ai-console", "anti-hallucination-guardrails", "Guardrail skill: verify before claim.")
+	writeHandlerTestSkill(t, skillsDir, "ai-console", "vps-ai-services", "VPS skill should not be auto-selected.")
+
+	var got model.OllamaChatRequest
+	ollama := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if err := json.NewDecoder(r.Body).Decode(&got); err != nil {
+			t.Fatalf("decode ollama request: %v", err)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"model":"panyakorn-local:latest","message":{"role":"assistant","content":"Guarded answer"},"done":true}`))
+	}))
+	defer ollama.Close()
+
+	svcCtx := &svc.ServiceContext{
+		Config:   config.Config{OllamaBaseURL: ollama.URL, OllamaModel: "panyakorn-local:latest", AISkillsDir: skillsDir},
+		Ollama:   model.NewOllamaClient(ollama.URL, "panyakorn-local:latest"),
+		AISkills: model.NewAISkillProfileStore(skillsDir),
+	}
+
+	req := httptest.NewRequest(http.MethodPost, "/api/ai/chat", strings.NewReader(`{"messages":[{"role":"user","content":"ช่วยดู VPS docker deploy"}]}`))
+	rec := httptest.NewRecorder()
+
+	AiChatHandler(svcCtx).ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, body = %s", rec.Code, rec.Body.String())
+	}
+	if len(got.Messages) != 2 {
+		t.Fatalf("messages len = %d, messages=%#v", len(got.Messages), got.Messages)
+	}
+	if got.Messages[0].Role != "system" || !strings.Contains(got.Messages[0].Content, "anti-hallucination-guardrails") || !strings.Contains(got.Messages[0].Content, "Guardrail skill") {
+		t.Fatalf("missing pinned guardrail skill context: %#v", got.Messages[0])
+	}
+	if strings.Contains(got.Messages[0].Content, "VPS skill should not be auto-selected") {
+		t.Fatalf("unexpected unrelated ai-console skill context: %#v", got.Messages[0])
+	}
+}
+
 func TestPortfolioAssistantChatHandlerInjectsPortfolioSkillProfile(t *testing.T) {
 	skillsDir := t.TempDir()
 	profileDir := filepath.Join(skillsDir, "portfolio-site", "portfolio-profile")
@@ -251,5 +291,17 @@ func TestAiChatHandlerRejectsOversizedBody(t *testing.T) {
 
 	if rec.Code != http.StatusBadRequest {
 		t.Fatalf("status = %d, body = %s", rec.Code, rec.Body.String())
+	}
+}
+
+func writeHandlerTestSkill(t *testing.T, baseDir, profile, skill, body string) {
+	t.Helper()
+	dir := filepath.Join(baseDir, profile, skill)
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	content := "---\nname: " + skill + "\ndescription: Test skill.\n---\n\n# " + skill + "\n\n" + body + "\n"
+	if err := os.WriteFile(filepath.Join(dir, "SKILL.md"), []byte(content), 0o644); err != nil {
+		t.Fatal(err)
 	}
 }

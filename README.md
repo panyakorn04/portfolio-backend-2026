@@ -266,8 +266,10 @@ curl -sS https://api.panyakorn.com/api/ai/embed \
 These endpoints keep the backend as the adapter boundary: the frontend calls the
 backend, and the backend forwards to the internal Ollama service configured by
 `OLLAMA_BASE_URL`/`OLLAMA_MODEL`. `/api/ai/chat` and `/api/ai/chat/stream`
-inject the `ai-console` skill profile for `ai.panyakorn.com`. `/api/portfolio/assistant/chat`
-and `/api/portfolio/assistant/chat/stream` inject the public-safe `portfolio-site`
+inject only the pinned `ai-console/anti-hallucination-guardrails` skill for
+`ai.panyakorn.com`. Other `ai-console` skills may exist in the asset repo, but
+are not auto-selected by the API. `/api/portfolio/assistant/chat` and
+`/api/portfolio/assistant/chat/stream` inject the public-safe `portfolio-site`
 skill profile for `panyakorn.com`. The stream endpoints convert Ollama's
 newline-delimited stream into AG-UI-compatible `text/event-stream` chunks for
 TanStack AI clients. Chat/generate caps request bodies/messages and applies a
@@ -317,8 +319,8 @@ All responses use the shared envelope:
 | PATCH | `/api/admin/users/:id` | admin |
 | GET/POST | `/api/admin/articles` | admin (POST: admin/editor) |
 | GET/PATCH/DELETE | `/api/admin/articles/:id` | admin (write: admin/editor) |
-| POST | `/api/ai/chat` | public, `ai-console` skills |
-| POST | `/api/ai/chat/stream` | public, `ai-console` skills |
+| POST | `/api/ai/chat` | public, pinned `ai-console/anti-hallucination-guardrails` skill |
+| POST | `/api/ai/chat/stream` | public, pinned `ai-console/anti-hallucination-guardrails` skill |
 | POST | `/api/portfolio/assistant/chat` | public, `portfolio-site` skills |
 | POST | `/api/portfolio/assistant/chat/stream` | public, `portfolio-site` skills; can persist by `sessionId` |
 | GET | `/api/portfolio/assistant/sessions/current` | public, anonymous cookie-backed portfolio chat session |
