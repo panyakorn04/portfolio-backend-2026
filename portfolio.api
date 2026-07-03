@@ -161,6 +161,9 @@ service portfolio-api {
 	@handler portfolioAssistantCurrentSession
 	get /api/portfolio/assistant/sessions/current
 
+	@handler portfolioAssistantLatestSession
+	get /api/portfolio/assistant/sessions/latest
+
 	@handler portfolioAssistantNewSession
 	post /api/portfolio/assistant/sessions
 

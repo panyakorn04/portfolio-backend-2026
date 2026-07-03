@@ -48,6 +48,7 @@ func RegisterHandlers(server *rest.Server, svcCtx *svc.ServiceContext) {
 		{Method: http.MethodPost, Path: "/api/portfolio/assistant/chat", Handler: PortfolioAssistantChatHandler(svcCtx)},
 		{Method: http.MethodPost, Path: "/api/portfolio/assistant/chat/stream", Handler: PortfolioAssistantChatStreamHandler(svcCtx)},
 		{Method: http.MethodGet, Path: "/api/portfolio/assistant/sessions/current", Handler: PortfolioAssistantCurrentSessionHandler(svcCtx)},
+		{Method: http.MethodGet, Path: "/api/portfolio/assistant/sessions/latest", Handler: PortfolioAssistantLatestSessionHandler(svcCtx)},
 		{Method: http.MethodPost, Path: "/api/portfolio/assistant/sessions", Handler: PortfolioAssistantNewSessionHandler(svcCtx)},
 		{Method: http.MethodDelete, Path: "/api/portfolio/assistant/sessions/:id", Handler: PortfolioAssistantDeleteSessionHandler(svcCtx)},
 		{Method: http.MethodPost, Path: "/api/ai/generate", Handler: AiGenerateHandler(svcCtx)},

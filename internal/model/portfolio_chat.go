@@ -67,7 +67,7 @@ func rowToPortfolioChatMessage(row portfolioChatMessageRow) PortfolioChatMessage
 	}
 }
 
-func (m *PortfolioChatSessionModel) Create(ctx context.Context, visitorHash, threadID, locale string, expiresAt time.Time) (*PortfolioChatSession, error) {
+func (m *PortfolioChatSessionModel) Create(ctx context.Context, visitorHash, threadID, locale string, title *string, expiresAt time.Time) (*PortfolioChatSession, error) {
 	now := time.Now().UTC().Format(time.RFC3339)
 	body := map[string]any{
 		"id":            newID(),
@@ -77,6 +77,9 @@ func (m *PortfolioChatSessionModel) Create(ctx context.Context, visitorHash, thr
 		"updatedAt":     now,
 		"lastSeenAt":    now,
 		"expiresAt":     expiresAt.UTC().Format(time.RFC3339),
+	}
+	if title != nil {
+		body["title"] = *title
 	}
 	values := url.Values{}
 	values.Set("select", "id,visitorIdHash,threadId,locale,title,createdAt,updatedAt,lastSeenAt,expiresAt")

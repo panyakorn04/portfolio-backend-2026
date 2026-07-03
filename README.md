@@ -322,9 +322,10 @@ All responses use the shared envelope:
 | POST | `/api/ai/chat` | public, pinned `ai-console/anti-hallucination-guardrails` skill |
 | POST | `/api/ai/chat/stream` | public, pinned `ai-console/anti-hallucination-guardrails` skill |
 | POST | `/api/portfolio/assistant/chat` | public, `portfolio-site` skills |
-| POST | `/api/portfolio/assistant/chat/stream` | public, `portfolio-site` skills; can persist by `sessionId` |
-| GET | `/api/portfolio/assistant/sessions/current` | public, anonymous cookie-backed portfolio chat session |
-| POST | `/api/portfolio/assistant/sessions` | public, create a new anonymous portfolio chat session |
+| POST | `/api/portfolio/assistant/chat/stream` | public, `portfolio-site` skills; continues/persists a selected chat when `sessionId` is provided |
+| GET | `/api/portfolio/assistant/sessions/latest` | public, load the visitor's latest anonymous portfolio chat session and messages; UI can pass returned `session.id` to `/api/portfolio/assistant/chat/stream` to continue |
+| GET | `/api/portfolio/assistant/sessions/current` | public, backward-compatible alias for `/api/portfolio/assistant/sessions/latest` |
+| POST | `/api/portfolio/assistant/sessions` | public, start a new anonymous portfolio chat session; requires `title` |
 | DELETE | `/api/portfolio/assistant/sessions/:id` | public, delete current visitor-owned portfolio chat session |
 | POST | `/api/ai/generate` | public, default model only |
 | POST | `/api/ai/embed` | admin |

@@ -25,7 +25,7 @@ const (
 )
 
 type portfolioChatSessionResponse struct {
-	Session  portfolioChatSessionDTO   `json:"session"`
+	Session  *portfolioChatSessionDTO  `json:"session"`
 	Messages []portfolioChatMessageDTO `json:"messages"`
 }
 
@@ -45,7 +45,16 @@ type portfolioChatMessageDTO struct {
 	CreatedAt time.Time `json:"createdAt"`
 }
 
+type portfolioChatNewSessionRequest struct {
+	Title  string `json:"title"`
+	Locale string `json:"locale,omitempty"`
+}
+
 func PortfolioAssistantCurrentSessionHandler(svcCtx *svc.ServiceContext) http.HandlerFunc {
+	return PortfolioAssistantLatestSessionHandler(svcCtx)
+}
+
+func PortfolioAssistantLatestSessionHandler(svcCtx *svc.ServiceContext) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if !requirePortfolioChatDatabase(w, svcCtx) {
 			return
@@ -65,12 +74,8 @@ func PortfolioAssistantCurrentSessionHandler(svcCtx *svc.ServiceContext) http.Ha
 			return
 		}
 		if session == nil {
-			session, err = createPortfolioChatSession(r, svcCtx, visitorHash)
-			if err != nil {
-				log.Printf("portfolio chat session create error: %v", err)
-				response.Error(w, http.StatusServiceUnavailable, "Unable to create chat session.")
-				return
-			}
+			response.Ok(w, http.StatusOK, portfolioEmptySessionResponse())
+			return
 		}
 
 		messages, err := svcCtx.PortfolioChatMessages.ListForSession(r.Context(), session.ID, portfolioChatMaxStoredMessages(svcCtx))
@@ -94,7 +99,18 @@ func PortfolioAssistantNewSessionHandler(svcCtx *svc.ServiceContext) http.Handle
 			response.Error(w, http.StatusServiceUnavailable, "Unable to initialize chat session.")
 			return
 		}
-		session, err := createPortfolioChatSession(r, svcCtx, visitorHash)
+
+		var payload portfolioChatNewSessionRequest
+		if !decodeJSON(w, r, &payload) {
+			return
+		}
+		title := strings.TrimSpace(payload.Title)
+		if title == "" {
+			response.Error(w, http.StatusBadRequest, "Title is required.")
+			return
+		}
+
+		session, err := createPortfolioChatSession(r, svcCtx, visitorHash, &title, payload.Locale)
 		if err != nil {
 			log.Printf("portfolio chat session create error: %v", err)
 			response.Error(w, http.StatusServiceUnavailable, "Unable to create chat session.")
@@ -137,13 +153,16 @@ func requirePortfolioChatDatabase(w http.ResponseWriter, svcCtx *svc.ServiceCont
 	return true
 }
 
-func createPortfolioChatSession(r *http.Request, svcCtx *svc.ServiceContext, visitorHash string) (*model.PortfolioChatSession, error) {
-	locale := strings.ToLower(strings.TrimSpace(r.URL.Query().Get("locale")))
+func createPortfolioChatSession(r *http.Request, svcCtx *svc.ServiceContext, visitorHash string, title *string, localeOverride string) (*model.PortfolioChatSession, error) {
+	locale := strings.ToLower(strings.TrimSpace(localeOverride))
+	if locale == "" {
+		locale = strings.ToLower(strings.TrimSpace(r.URL.Query().Get("locale")))
+	}
 	if locale != "th" {
 		locale = "en"
 	}
 	threadID := fmt.Sprintf("portfolio-widget-%d", time.Now().UnixNano())
-	return svcCtx.PortfolioChatSessions.Create(r.Context(), visitorHash, threadID, locale, portfolioChatExpiresAt(svcCtx))
+	return svcCtx.PortfolioChatSessions.Create(r.Context(), visitorHash, threadID, locale, title, portfolioChatExpiresAt(svcCtx))
 }
 
 func portfolioSessionResponse(session model.PortfolioChatSession, messages []model.PortfolioChatMessage) portfolioChatSessionResponse {
@@ -156,17 +175,22 @@ func portfolioSessionResponse(session model.PortfolioChatSession, messages []mod
 			CreatedAt: message.CreatedAt,
 		})
 	}
+	sessionDTO := portfolioChatSessionDTO{
+		ID:        session.ID,
+		ThreadID:  session.ThreadID,
+		Locale:    session.Locale,
+		Title:     session.Title,
+		UpdatedAt: session.UpdatedAt,
+		ExpiresAt: session.ExpiresAt,
+	}
 	return portfolioChatSessionResponse{
-		Session: portfolioChatSessionDTO{
-			ID:        session.ID,
-			ThreadID:  session.ThreadID,
-			Locale:    session.Locale,
-			Title:     session.Title,
-			UpdatedAt: session.UpdatedAt,
-			ExpiresAt: session.ExpiresAt,
-		},
+		Session:  &sessionDTO,
 		Messages: items,
 	}
+}
+
+func portfolioEmptySessionResponse() portfolioChatSessionResponse {
+	return portfolioChatSessionResponse{Messages: []portfolioChatMessageDTO{}}
 }
 
 func portfolioVisitorHash(w http.ResponseWriter, r *http.Request, svcCtx *svc.ServiceContext) (string, bool) {
