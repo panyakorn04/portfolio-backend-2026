@@ -247,7 +247,9 @@ jobs:
                   continue
                 fi
                 echo "Ensuring Ollama model is available: $model"
-                docker compose exec -T ollama ollama pull "$model"
+                if ! docker compose exec -T ollama ollama pull "$model"; then
+                  echo "WARNING: could not pull $model; it may be a locally-created model or unavailable from Ollama library."
+                fi
               done
             fi
 
