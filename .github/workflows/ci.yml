@@ -239,7 +239,7 @@ jobs:
             BACKEND_IMAGE="$BACKEND_IMAGE" docker compose -f docker-compose.yml -f docker-compose.ai-skills.yml pull backend
             BACKEND_IMAGE="$BACKEND_IMAGE" docker compose -f docker-compose.yml -f docker-compose.ai-skills.yml up -d backend
 
-            if [ -n "${OLLAMA_ALLOWED_MODELS:-}" ]; then
+            if [ "${OLLAMA_PULL_ALLOWED_MODELS:-}" = "true" ] && [ -n "${OLLAMA_ALLOWED_MODELS:-}" ]; then
               IFS=',' read -ra allowed_models <<< "$OLLAMA_ALLOWED_MODELS"
               for raw_model in "${allowed_models[@]}"; do
                 model="$(printf '%s' "$raw_model" | xargs)"
