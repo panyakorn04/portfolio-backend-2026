@@ -38,10 +38,19 @@ jobs:
             cd "$COMPOSE_DIR"
 
             echo "Checking Ollama container..."
-            docker compose ps ollama
+            docker ps --filter name=ollama --format 'table {{.Names}}\t{{.Status}}\t{{.Image}}'
+
+            if docker compose config --services | grep -qx ollama; then
+              OLLAMA_CMD="docker compose exec -T ollama ollama"
+            elif docker ps --format '{{.Names}}' | grep -qx ollama; then
+              OLLAMA_CMD="docker exec ollama ollama"
+            else
+              echo "No running ollama container found."
+              exit 1
+            fi
 
             echo "Pulling Ollama model: $MODEL"
-            docker compose exec -T ollama ollama pull "$MODEL"
+            $OLLAMA_CMD pull "$MODEL"
 
             echo "Installed Ollama models:"
-            docker compose exec -T ollama ollama list
+            $OLLAMA_CMD list
