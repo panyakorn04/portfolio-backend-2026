@@ -1,0 +1,47 @@
+name: Pull Ollama Model
+
+on:
+  workflow_dispatch:
+    inputs:
+      model:
+        description: Ollama model tag to pull, e.g. llama3.2:3b
+        required: true
+        default: llama3.2:3b
+      compose_dir:
+        description: VPS compose directory
+        required: true
+        default: /opt/apps
+
+concurrency:
+  group: pull-ollama-model-${{ inputs.model }}
+  cancel-in-progress: false
+
+jobs:
+  pull:
+    name: Pull model on VPS
+    runs-on: ubuntu-latest
+    environment: production
+    steps:
+      - name: Pull Ollama model
+        uses: appleboy/ssh-action@v1.0.3
+        env:
+          MODEL: ${{ inputs.model }}
+          COMPOSE_DIR: ${{ inputs.compose_dir }}
+        with:
+          host: ${{ secrets.VPS_HOST }}
+          username: ${{ secrets.VPS_USER }}
+          key: ${{ secrets.VPS_SSH_KEY }}
+          command_timeout: 45m
+          envs: MODEL,COMPOSE_DIR
+          script: |
+            set -euo pipefail
+            cd "$COMPOSE_DIR"
+
+            echo "Checking Ollama container..."
+            docker compose ps ollama
+
+            echo "Pulling Ollama model: $MODEL"
+            docker compose exec -T ollama ollama pull "$MODEL"
+
+            echo "Installed Ollama models:"
+            docker compose exec -T ollama ollama list
