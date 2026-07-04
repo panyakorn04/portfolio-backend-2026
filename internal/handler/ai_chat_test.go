@@ -39,6 +39,75 @@ func TestValidateAIChatMessages(t *testing.T) {
 	}
 }
 
+func TestResolveAIChatModelUsesWhitelist(t *testing.T) {
+	svcCtx := &svc.ServiceContext{
+		Config: config.Config{OllamaAllowedModels: "panyakorn-local:latest, qwen2.5-coder:7b"},
+		Ollama: model.NewOllamaClient("http://127.0.0.1:1", "panyakorn-local:latest"),
+	}
+
+	selected, _, ok := resolveAIChatModel(svcCtx, "qwen2.5-coder:7b")
+	if !ok || selected != "qwen2.5-coder:7b" {
+		t.Fatalf("selected = %q, ok = %v", selected, ok)
+	}
+
+	selected, _, ok = resolveAIChatModel(svcCtx, "")
+	if !ok || selected != "panyakorn-local:latest" {
+		t.Fatalf("default selected = %q, ok = %v", selected, ok)
+	}
+
+	if _, _, ok = resolveAIChatModel(svcCtx, "not-installed:latest"); ok {
+		t.Fatal("unlisted model should be rejected")
+	}
+}
+
+func TestAiChatHandlerForwardsSelectedModelToOllama(t *testing.T) {
+	var got model.OllamaChatRequest
+	ollama := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if err := json.NewDecoder(r.Body).Decode(&got); err != nil {
+			t.Fatalf("decode ollama request: %v", err)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"model":"qwen2.5-coder:7b","message":{"role":"assistant","content":"Coder ready"},"done":true}`))
+	}))
+	defer ollama.Close()
+
+	svcCtx := &svc.ServiceContext{
+		Config: config.Config{
+			OllamaBaseURL:       ollama.URL,
+			OllamaModel:         "panyakorn-local:latest",
+			OllamaAllowedModels: "panyakorn-local:latest,qwen2.5-coder:7b",
+		},
+		Ollama: model.NewOllamaClient(ollama.URL, "panyakorn-local:latest"),
+	}
+
+	req := httptest.NewRequest(http.MethodPost, "/api/ai/chat", strings.NewReader(`{"model":"qwen2.5-coder:7b","messages":[{"role":"user","content":"write code"}]}`))
+	rec := httptest.NewRecorder()
+
+	AiChatHandler(svcCtx).ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, body = %s", rec.Code, rec.Body.String())
+	}
+	if got.Model != "qwen2.5-coder:7b" {
+		t.Fatalf("model = %q", got.Model)
+	}
+}
+
+func TestAiChatHandlerRejectsUnlistedModel(t *testing.T) {
+	svcCtx := &svc.ServiceContext{
+		Config: config.Config{OllamaAllowedModels: "panyakorn-local:latest"},
+		Ollama: model.NewOllamaClient("http://127.0.0.1:1", "panyakorn-local:latest"),
+	}
+	req := httptest.NewRequest(http.MethodPost, "/api/ai/chat", strings.NewReader(`{"model":"not-installed:latest","messages":[{"role":"user","content":"hello"}]}`))
+	rec := httptest.NewRecorder()
+
+	AiChatHandler(svcCtx).ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, body = %s", rec.Code, rec.Body.String())
+	}
+}
+
 func TestAiChatHandlerForwardsToOllama(t *testing.T) {
 	var got model.OllamaChatRequest
 	ollama := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

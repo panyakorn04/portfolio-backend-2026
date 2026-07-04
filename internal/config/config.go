@@ -25,9 +25,10 @@ type Config struct {
 	AiProvider string `json:",optional"`
 	AiApiKey   string `json:",optional"`
 
-	OllamaBaseURL string `json:",optional"`
-	OllamaModel   string `json:",optional"`
-	AISkillsDir   string `json:",optional"`
+	OllamaBaseURL       string `json:",optional"`
+	OllamaModel         string `json:",optional"`
+	OllamaAllowedModels string `json:",optional"`
+	AISkillsDir         string `json:",optional"`
 
 	PortfolioChatVisitorSecret     string `json:",optional"`
 	PortfolioChatSessionTTLHours   int    `json:",optional"`

@@ -154,12 +154,20 @@ func (c *OllamaClient) Model() string {
 }
 
 func (c *OllamaClient) Chat(ctx context.Context, messages []OllamaChatMessage) (*OllamaChatResponse, error) {
+	return c.ChatWithModel(ctx, "", messages)
+}
+
+func (c *OllamaClient) ChatWithModel(ctx context.Context, model string, messages []OllamaChatMessage) (*OllamaChatResponse, error) {
 	if c == nil {
 		return nil, fmt.Errorf("ollama client is not configured")
 	}
+	model = strings.TrimSpace(model)
+	if model == "" {
+		model = c.Model()
+	}
 
 	payload := OllamaChatRequest{
-		Model:    c.Model(),
+		Model:    model,
 		Messages: messages,
 		Stream:   false,
 	}
@@ -172,15 +180,23 @@ func (c *OllamaClient) Chat(ctx context.Context, messages []OllamaChatMessage) (
 }
 
 func (c *OllamaClient) ChatStream(ctx context.Context, messages []OllamaChatMessage, onChunk func(OllamaChatResponse) error) error {
+	return c.ChatStreamWithModel(ctx, "", messages, onChunk)
+}
+
+func (c *OllamaClient) ChatStreamWithModel(ctx context.Context, model string, messages []OllamaChatMessage, onChunk func(OllamaChatResponse) error) error {
 	if c == nil {
 		return fmt.Errorf("ollama client is not configured")
 	}
 	if onChunk == nil {
 		return fmt.Errorf("ollama stream callback is required")
 	}
+	model = strings.TrimSpace(model)
+	if model == "" {
+		model = c.Model()
+	}
 
 	payload := OllamaChatRequest{
-		Model:    c.Model(),
+		Model:    model,
 		Messages: messages,
 		Stream:   true,
 	}

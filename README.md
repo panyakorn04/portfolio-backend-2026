@@ -204,6 +204,7 @@ backend:
     AI_API_KEY: ${AI_API_KEY}
     OLLAMA_BASE_URL: ${OLLAMA_BASE_URL:-http://ollama:11434}
     OLLAMA_MODEL: ${OLLAMA_MODEL:-panyakorn-local:latest}
+    OLLAMA_ALLOWED_MODELS: ${OLLAMA_ALLOWED_MODELS:-panyakorn-local:latest}
     AI_SKILLS_DIR: ${AI_SKILLS_DIR:-/opt/ai/skills}
     PORTFOLIO_CHAT_VISITOR_SECRET: ${PORTFOLIO_CHAT_VISITOR_SECRET}
     PORTFOLIO_CHAT_SESSION_TTL_HOURS: ${PORTFOLIO_CHAT_SESSION_TTL_HOURS:-2160}
@@ -220,12 +221,12 @@ AI adapter endpoints:
 # Chat with message history. Returns the shared JSON envelope.
 curl -sS https://api.panyakorn.com/api/ai/chat \
   -H 'Content-Type: application/json' \
-  -d '{"messages":[{"role":"user","content":"ตอบเป็นภาษาไทยสั้น ๆ ว่าพร้อมใช้งานไหม"}]}'
+  -d '{"model":"panyakorn-local:latest","messages":[{"role":"user","content":"ตอบเป็นภาษาไทยสั้น ๆ ว่าพร้อมใช้งานไหม"}]}'
 
 # Streaming chat for TanStack AI / AG-UI clients. Returns text/event-stream.
 curl -N https://api.panyakorn.com/api/ai/chat/stream \
   -H 'Content-Type: application/json' \
-  -d '{"threadId":"thread-demo","runId":"run-demo","messages":[{"role":"user","content":"ตอบสั้น ๆ ว่า API OK"}]}'
+  -d '{"model":"panyakorn-local:latest","threadId":"thread-demo","runId":"run-demo","messages":[{"role":"user","content":"ตอบสั้น ๆ ว่า API OK"}]}'
 
 # Public portfolio-site assistant profile for panyakorn.com visitors.
 curl -sS https://api.panyakorn.com/api/portfolio/assistant/chat \
@@ -266,7 +267,10 @@ curl -sS https://api.panyakorn.com/api/ai/embed \
 These endpoints keep the backend as the adapter boundary: the frontend calls the
 backend, and the backend forwards to the internal Ollama service configured by
 `OLLAMA_BASE_URL`/`OLLAMA_MODEL`. `/api/ai/chat` and `/api/ai/chat/stream`
-inject only the pinned `ai-console/anti-hallucination-guardrails` skill for
+accept an optional `model` field, but only models listed in the comma-separated
+`OLLAMA_ALLOWED_MODELS` whitelist are forwarded to Ollama. When omitted, the
+backend uses `OLLAMA_MODEL`. The chat endpoints inject only the pinned
+`ai-console/anti-hallucination-guardrails` skill for
 `ai.panyakorn.com`. Other `ai-console` skills may exist in the asset repo, but
 are not auto-selected by the API. `/api/portfolio/assistant/chat` and
 `/api/portfolio/assistant/chat/stream` inject the public-safe `portfolio-site`

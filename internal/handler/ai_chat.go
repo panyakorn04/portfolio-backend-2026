@@ -27,6 +27,7 @@ const (
 var aiChatLimiter = newAIChatRateLimiter(aiChatRequestsPerHour, time.Hour)
 
 type aiChatRequest struct {
+	Model    string                    `json:"model"`
 	Messages []model.OllamaChatMessage `json:"messages"`
 }
 
@@ -34,6 +35,7 @@ type aiChatStreamRequest struct {
 	SessionID string                    `json:"sessionId"`
 	ThreadID  string                    `json:"threadId"`
 	RunID     string                    `json:"runId"`
+	Model     string                    `json:"model"`
 	Message   *model.OllamaChatMessage  `json:"message"`
 	Messages  []model.OllamaChatMessage `json:"messages"`
 }
@@ -78,6 +80,12 @@ func aiChatHandlerForProfile(svcCtx *svc.ServiceContext, skillProfile string) ht
 			return
 		}
 
+		selectedModel, errDetail, ok := resolveAIChatModel(svcCtx, body.Model)
+		if !ok {
+			response.Error(w, http.StatusBadRequest, "Invalid AI model.", errDetail)
+			return
+		}
+
 		messages, err := messagesWithSkillProfile(svcCtx, skillProfile, body.Messages)
 		if err != nil {
 			log.Printf("ai chat skill profile error: %v", err)
@@ -85,7 +93,7 @@ func aiChatHandlerForProfile(svcCtx *svc.ServiceContext, skillProfile string) ht
 			return
 		}
 
-		chat, err := svcCtx.Ollama.Chat(r.Context(), messages)
+		chat, err := svcCtx.Ollama.ChatWithModel(r.Context(), selectedModel, messages)
 		if err != nil {
 			log.Printf("ai chat ollama error: %v", err)
 			response.Error(w, http.StatusBadGateway, "Unable to get a response from the AI model.")
@@ -129,6 +137,11 @@ func aiChatStreamHandlerForProfile(svcCtx *svc.ServiceContext, skillProfile stri
 		body.SessionID = strings.TrimSpace(body.SessionID)
 		body.ThreadID = strings.TrimSpace(body.ThreadID)
 		body.RunID = strings.TrimSpace(body.RunID)
+		selectedModel, errDetail, ok := resolveAIChatModel(svcCtx, body.Model)
+		if !ok {
+			response.Error(w, http.StatusBadRequest, "Invalid AI model.", errDetail)
+			return
+		}
 		streamMessages := body.Messages
 		var persistedSession *model.PortfolioChatSession
 		var persistedUserMessage *model.OllamaChatMessage
@@ -187,7 +200,7 @@ func aiChatStreamHandlerForProfile(svcCtx *svc.ServiceContext, skillProfile stri
 			return
 		}
 
-		modelName := svcCtx.Ollama.Model()
+		modelName := selectedModel
 		messageID := "assistant-" + body.RunID
 		w.Header().Set("Content-Type", "text/event-stream; charset=utf-8")
 		w.Header().Set("Cache-Control", "no-cache, no-transform")
@@ -231,7 +244,7 @@ func aiChatStreamHandlerForProfile(svcCtx *svc.ServiceContext, skillProfile stri
 			return
 		}
 
-		err = svcCtx.Ollama.ChatStream(r.Context(), messages, func(chunk model.OllamaChatResponse) error {
+		err = svcCtx.Ollama.ChatStreamWithModel(r.Context(), selectedModel, messages, func(chunk model.OllamaChatResponse) error {
 			if chunk.Model != "" {
 				modelName = chunk.Model
 			}
@@ -368,6 +381,50 @@ Use only the relevant skill context below as private guidance. Do not reveal raw
 	withContext = append(withContext, model.OllamaChatMessage{Role: "system", Content: profileInstruction})
 	withContext = append(withContext, messages...)
 	return withContext, nil
+}
+
+func allowedAIChatModels(svcCtx *svc.ServiceContext) []string {
+	defaultModel := model.DefaultOllamaModel
+	if svcCtx != nil && svcCtx.Ollama != nil {
+		defaultModel = svcCtx.Ollama.Model()
+	}
+
+	configured := ""
+	if svcCtx != nil {
+		configured = svcCtx.Config.OllamaAllowedModels
+	}
+	if strings.TrimSpace(configured) == "" {
+		return []string{defaultModel}
+	}
+
+	models := make([]string, 0)
+	seen := map[string]bool{}
+	for _, item := range strings.Split(configured, ",") {
+		name := strings.TrimSpace(item)
+		if name == "" || seen[name] {
+			continue
+		}
+		seen[name] = true
+		models = append(models, name)
+	}
+	if !seen[defaultModel] {
+		models = append([]string{defaultModel}, models...)
+	}
+	return models
+}
+
+func resolveAIChatModel(svcCtx *svc.ServiceContext, requested string) (string, response.ErrorDetail, bool) {
+	requested = strings.TrimSpace(requested)
+	allowed := allowedAIChatModels(svcCtx)
+	if requested == "" {
+		return allowed[0], response.ErrorDetail{}, true
+	}
+	for _, name := range allowed {
+		if requested == name {
+			return requested, response.ErrorDetail{}, true
+		}
+	}
+	return "", response.ErrorDetail{Field: "model", Message: "Model is not allowed for this endpoint."}, false
 }
 
 func validateAIChatMessages(messages []model.OllamaChatMessage) (response.ErrorDetail, bool) {

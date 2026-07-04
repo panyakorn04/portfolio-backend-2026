@@ -39,6 +39,7 @@ AiProvider: ${AI_PROVIDER}
 AiApiKey: ${AI_API_KEY}
 OllamaBaseURL: ${OLLAMA_BASE_URL}
 OllamaModel: ${OLLAMA_MODEL}
+OllamaAllowedModels: ${OLLAMA_ALLOWED_MODELS}
 AISkillsDir: ${AI_SKILLS_DIR}
 
 # Public portfolio assistant anonymous backend sessions.
