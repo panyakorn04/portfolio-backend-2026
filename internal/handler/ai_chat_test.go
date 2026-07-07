@@ -289,6 +289,7 @@ func TestAiChatStreamHandlerForwardsOllamaStreamAsSSE(t *testing.T) {
 	}
 
 	var eventTypes []string
+	var loopStages []string
 	var deltas []string
 	scanner := bufio.NewScanner(strings.NewReader(rec.Body.String()))
 	for scanner.Scan() {
@@ -300,7 +301,11 @@ func TestAiChatStreamHandlerForwardsOllamaStreamAsSSE(t *testing.T) {
 		if err := json.Unmarshal([]byte(strings.TrimPrefix(line, "data: ")), &event); err != nil {
 			t.Fatalf("decode SSE event %q: %v", line, err)
 		}
-		eventTypes = append(eventTypes, event["type"].(string))
+		eventType := event["type"].(string)
+		eventTypes = append(eventTypes, eventType)
+		if eventType == "LOOP_STAGE" {
+			loopStages = append(loopStages, event["stage"].(string))
+		}
 		if delta, ok := event["delta"].(string); ok {
 			deltas = append(deltas, delta)
 		}
@@ -310,9 +315,14 @@ func TestAiChatStreamHandlerForwardsOllamaStreamAsSSE(t *testing.T) {
 	}
 
 	joinedTypes := strings.Join(eventTypes, ",")
-	for _, want := range []string{"RUN_STARTED", "TEXT_MESSAGE_START", "TEXT_MESSAGE_CONTENT", "TEXT_MESSAGE_END", "RUN_FINISHED"} {
+	for _, want := range []string{"RUN_STARTED", "LOOP_STAGE", "TEXT_MESSAGE_START", "TEXT_MESSAGE_CONTENT", "TEXT_MESSAGE_END", "RUN_FINISHED"} {
 		if !strings.Contains(joinedTypes, want) {
 			t.Fatalf("missing event %s in %v; body=%s", want, eventTypes, rec.Body.String())
+		}
+	}
+	for _, want := range []string{"observing", "classifying", "planning", "retrieving_context", "drafting", "evaluating", "finalizing"} {
+		if !strings.Contains(strings.Join(loopStages, ","), want) {
+			t.Fatalf("missing loop stage %s in %v; body=%s", want, loopStages, rec.Body.String())
 		}
 	}
 	if strings.Join(deltas, "") != "API OK" {

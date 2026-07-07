@@ -216,13 +216,19 @@ func aiChatStreamHandlerForProfile(svcCtx *svc.ServiceContext, skillProfile stri
 			log.Printf("ai chat stream write error: %v", err)
 			return
 		}
-		if err := writeAIStreamEvent(w, flusher, map[string]any{
-			"type":      "TEXT_MESSAGE_START",
-			"timestamp": time.Now().UnixMilli(),
-			"messageId": messageID,
-			"role":      "assistant",
-			"model":     modelName,
-		}); err != nil {
+		if err := writeAIStreamStage(w, flusher, body.ThreadID, body.RunID, modelName, "observing", "Understanding your question", "Reading the latest visitor message and session context."); err != nil {
+			log.Printf("ai chat stream write error: %v", err)
+			return
+		}
+		if err := writeAIStreamStage(w, flusher, body.ThreadID, body.RunID, modelName, "classifying", "Detecting intent", "Checking whether the request is a public portfolio inquiry."); err != nil {
+			log.Printf("ai chat stream write error: %v", err)
+			return
+		}
+		if err := writeAIStreamStage(w, flusher, body.ThreadID, body.RunID, modelName, "planning", "Planning a useful answer", "Selecting the safest response path for this portfolio assistant."); err != nil {
+			log.Printf("ai chat stream write error: %v", err)
+			return
+		}
+		if err := writeAIStreamStage(w, flusher, body.ThreadID, body.RunID, modelName, "retrieving_context", "Checking public portfolio context", "Loading only the public-safe skill profile for this surface."); err != nil {
 			log.Printf("ai chat stream write error: %v", err)
 			return
 		}
@@ -241,6 +247,21 @@ func aiChatStreamHandlerForProfile(svcCtx *svc.ServiceContext, skillProfile stri
 				"message":   "Unable to load AI skill context.",
 				"code":      "SKILL_PROFILE_ERROR",
 			})
+			return
+		}
+
+		if err := writeAIStreamStage(w, flusher, body.ThreadID, body.RunID, modelName, "drafting", "Drafting the response", "Streaming an answer grounded in the allowed portfolio context."); err != nil {
+			log.Printf("ai chat stream write error: %v", err)
+			return
+		}
+		if err := writeAIStreamEvent(w, flusher, map[string]any{
+			"type":      "TEXT_MESSAGE_START",
+			"timestamp": time.Now().UnixMilli(),
+			"messageId": messageID,
+			"role":      "assistant",
+			"model":     modelName,
+		}); err != nil {
+			log.Printf("ai chat stream write error: %v", err)
 			return
 		}
 
@@ -280,12 +301,20 @@ func aiChatStreamHandlerForProfile(svcCtx *svc.ServiceContext, skillProfile stri
 			return
 		}
 
+		if err := writeAIStreamStage(w, flusher, body.ThreadID, body.RunID, modelName, "evaluating", "Reviewing for accuracy", "Checking that the answer stays within the public portfolio scope."); err != nil {
+			log.Printf("ai chat stream write error: %v", err)
+			return
+		}
 		if err := writeAIStreamEvent(w, flusher, map[string]any{
 			"type":      "TEXT_MESSAGE_END",
 			"timestamp": time.Now().UnixMilli(),
 			"messageId": messageID,
 			"model":     modelName,
 		}); err != nil {
+			log.Printf("ai chat stream write error: %v", err)
+			return
+		}
+		if err := writeAIStreamStage(w, flusher, body.ThreadID, body.RunID, modelName, "finalizing", "Finalizing answer", "Completing the assistant run and saving the conversation when available."); err != nil {
 			log.Printf("ai chat stream write error: %v", err)
 			return
 		}
@@ -336,6 +365,19 @@ func persistPortfolioChatExchange(r *http.Request, svcCtx *svc.ServiceContext, s
 		return err
 	}
 	return svcCtx.PortfolioChatSessions.Touch(r.Context(), sessionID, portfolioChatExpiresAt(svcCtx))
+}
+
+func writeAIStreamStage(w http.ResponseWriter, flusher http.Flusher, threadID, runID, modelName, stage, label, detail string) error {
+	return writeAIStreamEvent(w, flusher, map[string]any{
+		"type":      "LOOP_STAGE",
+		"timestamp": time.Now().UnixMilli(),
+		"threadId":  threadID,
+		"runId":     runID,
+		"model":     modelName,
+		"stage":     stage,
+		"label":     label,
+		"detail":    detail,
+	})
 }
 
 func writeAIStreamEvent(w http.ResponseWriter, flusher http.Flusher, event map[string]any) error {
