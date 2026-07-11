@@ -50,7 +50,7 @@ cp .env.example .env
 
 go mod tidy
 
-# Apply migrations in numeric order through 0006_studio_execution_create_audit.sql.
+# Apply migrations in numeric order through 0007_studio_execution_stages.sql.
 
 # Create/update an admin user through Supabase REST
 set -a; source .env; set +a
@@ -79,6 +79,8 @@ Optional Redis article cache and distributed rate-limit env:
 `migrations/0005_studio_audit_log.sql` adds the append-only `StudioAuditLog`.
 `migrations/0006_studio_execution_create_audit.sql` additively permits the
 `execution.create` audit action without modifying an applied migration.
+`migrations/0007_studio_execution_stages.sql` adds ordered, execution-specific
+stages and idempotently seeds existing runs from their workflow nodes.
 The public `GET /api/studio/overview` reads these tables and deliberately returns
 the safe portfolio seed if Supabase is not configured, unreachable, or the new
 tables have not been migrated yet. It never returns database errors or secrets.
@@ -98,6 +100,14 @@ Redis provides cross-instance atomic counters when configured; a process-local
 limiter remains active if Redis is absent or temporarily unavailable. Audit
 metadata contains only IP, method, path, and a length-capped user agent—never
 passwords, cookies, authorization headers, or token hashes.
+
+Public execution telemetry is available at
+`GET /api/studio/executions/:id/stages` and as SSE at
+`GET /api/studio/executions/:id/events`. The stream sends an initial `snapshot`,
+changed snapshots only, comment heartbeats, and a bounded-lifetime `reconnect`
+event. It polls Supabase every two seconds, closes immediately on client
+disconnect, and exposes only the public execution projection plus safe stage
+fields (never workflow/admin credentials or audit metadata).
 
 All routes use the standard `{ "ok": true, "data": ... }` or
 `{ "ok": false, "error": ... }` response envelope.

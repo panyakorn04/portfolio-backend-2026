@@ -16,6 +16,8 @@ func RegisterHandlers(server *rest.Server, svcCtx *svc.ServiceContext) {
 		{Method: http.MethodGet, Path: "/api/articles", Handler: ArticlesHandler(svcCtx)},
 		{Method: http.MethodGet, Path: "/api/articles/:slug", Handler: ArticleBySlugHandler(svcCtx)},
 		{Method: http.MethodGet, Path: "/api/studio/overview", Handler: StudioOverviewHandler(svcCtx)},
+		{Method: http.MethodGet, Path: "/api/studio/executions/:id/stages", Handler: StudioExecutionStagesHandler(svcCtx)},
+		{Method: http.MethodGet, Path: "/api/studio/executions/:id/events", Handler: StudioExecutionEventsHandler(svcCtx)},
 
 		// Admin Studio (viewer may list; admin/editor may mutate)
 		{Method: http.MethodGet, Path: "/api/admin/studio/workflows", Handler: AdminListStudioWorkflowsHandler(svcCtx)},

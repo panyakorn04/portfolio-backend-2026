@@ -12,7 +12,7 @@ import (
 func TestStudioModelCreateExecutionPersistsRunningRun(t *testing.T) {
 	var body map[string]any
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.Method != http.MethodPost || r.URL.Path != "/rest/v1/StudioExecution" || r.URL.Query().Get("select") != "*" || r.Header.Get("Prefer") != "return=representation" {
+		if r.Method != http.MethodPost || r.URL.Path != "/rest/v1/rpc/createStudioExecutionWithStages" {
 			t.Fatalf("unexpected request %s %s?%s Prefer=%q", r.Method, r.URL.Path, r.URL.RawQuery, r.Header.Get("Prefer"))
 		}
 		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
@@ -23,17 +23,15 @@ func TestStudioModelCreateExecutionPersistsRunningRun(t *testing.T) {
 	}))
 	defer server.Close()
 
-	got, err := NewStudioModel(NewSupabaseREST(server.URL, "key")).CreateExecution(context.Background(), "wf-1", "Active Flow")
+	got, err := NewStudioModel(NewSupabaseREST(server.URL, "key")).CreateExecution(context.Background(), "wf-1", "Active Flow", []string{"Start"})
 	if err != nil || got.Status != "running" {
 		t.Fatalf("execution=%#v err=%v", got, err)
 	}
-	if body["id"] == "" || body["workflowId"] != "wf-1" || body["workflow"] != "Active Flow" || body["status"] != "running" || body["durationMs"] != float64(0) || body["cost"] != float64(0) {
+	if body["executionId"] == "" || body["workflowId"] != "wf-1" || body["workflowName"] != "Active Flow" || len(body["nodes"].([]any)) != 1 {
 		t.Fatalf("unexpected body %#v", body)
 	}
-	for _, field := range []string{"startedAt", "createdAt", "updatedAt"} {
-		if _, err := time.Parse(time.RFC3339Nano, body[field].(string)); err != nil {
-			t.Fatalf("%s is not a timestamp: %#v", field, body[field])
-		}
+	if _, err := time.Parse(time.RFC3339Nano, body["occurredAt"].(string)); err != nil {
+		t.Fatalf("occurredAt is not a timestamp: %#v", body["occurredAt"])
 	}
 }
 

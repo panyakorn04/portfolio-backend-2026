@@ -59,9 +59,11 @@ func TestAdminCreateStudioExecutionPersistsAndAuditsActiveWorkflow(t *testing.T)
 		switch r.URL.Path {
 		case "/rest/v1/StudioWorkflow":
 			_, _ = w.Write([]byte(`[{"id":"wf-1","name":"Active Flow","description":"Demo","category":"Ops","status":"active","runs":0,"success":0,"nodes":["Start"],"createdAt":"2026-01-01T00:00:00Z","updatedAt":"2026-01-01T00:00:00Z"}]`))
-		case "/rest/v1/StudioExecution":
+		case "/rest/v1/rpc/createStudioExecutionWithStages":
 			_ = json.NewDecoder(r.Body).Decode(&executionBody)
 			_, _ = w.Write([]byte(`[{"id":"run-1","workflowId":"wf-1","workflow":"Active Flow","status":"running","startedAt":"2026-07-11T10:00:00Z","durationMs":0,"cost":0,"createdAt":"2026-07-11T10:00:00Z","updatedAt":"2026-07-11T10:00:00Z"}]`))
+		case "/rest/v1/StudioExecutionStage":
+			w.WriteHeader(http.StatusNoContent)
 		case "/rest/v1/StudioAuditLog":
 			_ = json.NewDecoder(r.Body).Decode(&auditBody)
 			_, _ = w.Write([]byte(`[{"id":"audit-1","actorType":"bearer","actorId":null,"actorLabel":"admin bearer","action":"execution.create","resourceType":"execution","resourceId":"run-1","fromStatus":null,"toStatus":"running","metadata":{},"createdAt":"2026-07-11T10:00:00Z"}]`))
@@ -78,7 +80,7 @@ func TestAdminCreateStudioExecutionPersistsAndAuditsActiveWorkflow(t *testing.T)
 	if rec.Code != http.StatusCreated {
 		t.Fatalf("status=%d body=%s", rec.Code, rec.Body.String())
 	}
-	if executionBody["workflow"] != "Active Flow" || executionBody["status"] != "running" || auditBody["action"] != "execution.create" || auditBody["resourceId"] != "run-1" {
+	if executionBody["workflowName"] != "Active Flow" || len(executionBody["nodes"].([]any)) != 1 || auditBody["action"] != "execution.create" || auditBody["resourceId"] != "run-1" {
 		t.Fatalf("execution=%#v audit=%#v", executionBody, auditBody)
 	}
 }

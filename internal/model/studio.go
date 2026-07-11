@@ -36,6 +36,19 @@ type StudioExecution struct {
 	UpdatedAt  time.Time `json:"updatedAt"`
 }
 
+type StudioExecutionStage struct {
+	ExecutionID string         `json:"executionId"`
+	Position    int            `json:"position"`
+	Name        string         `json:"name"`
+	Status      string         `json:"status"`
+	Detail      string         `json:"detail"`
+	Tool        *string        `json:"tool,omitempty"`
+	Metadata    map[string]any `json:"metadata"`
+	StartedAt   *time.Time     `json:"startedAt,omitempty"`
+	CompletedAt *time.Time     `json:"completedAt,omitempty"`
+	UpdatedAt   time.Time      `json:"updatedAt"`
+}
+
 type StudioWorkflowInput struct {
 	Name, Description, Category, Status string
 	Nodes                               []string
@@ -65,11 +78,39 @@ type studioExecutionRow struct {
 	Cost       float64 `json:"cost"`
 }
 
+type studioExecutionStageRow struct {
+	ExecutionID string         `json:"executionId"`
+	Position    int            `json:"position"`
+	Name        string         `json:"name"`
+	Status      string         `json:"status"`
+	Detail      string         `json:"detail"`
+	Tool        *string        `json:"tool"`
+	Metadata    map[string]any `json:"metadata"`
+	StartedAt   *string        `json:"startedAt"`
+	CompletedAt *string        `json:"completedAt"`
+	UpdatedAt   string         `json:"updatedAt"`
+}
+
 func workflowFromRow(r studioWorkflowRow) StudioWorkflow {
 	return StudioWorkflow{ID: r.ID, Name: r.Name, Description: r.Description, Category: r.Category, Status: r.Status, Runs: r.Runs, Success: r.Success, Nodes: r.Nodes, CreatedAt: timeFromString(r.CreatedAt), UpdatedAt: timeFromString(r.UpdatedAt)}
 }
 func executionFromRow(r studioExecutionRow) StudioExecution {
 	return StudioExecution{ID: r.ID, WorkflowID: r.WorkflowID, Workflow: r.Workflow, Status: r.Status, StartedAt: timeFromString(r.StartedAt), DurationMS: r.DurationMS, Cost: r.Cost, CreatedAt: timeFromString(r.CreatedAt), UpdatedAt: timeFromString(r.UpdatedAt)}
+}
+func executionStageFromRow(r studioExecutionStageRow) StudioExecutionStage {
+	return StudioExecutionStage{ExecutionID: r.ExecutionID, Position: r.Position, Name: r.Name, Status: r.Status, Detail: r.Detail, Tool: r.Tool, Metadata: r.Metadata, StartedAt: timePtrFromString(r.StartedAt), CompletedAt: timePtrFromString(r.CompletedAt), UpdatedAt: timeFromString(r.UpdatedAt)}
+}
+func (m *StudioModel) ListExecutionStages(ctx context.Context, executionID string) ([]StudioExecutionStage, error) {
+	v := url.Values{"executionId": {"eq." + executionID}, "select": {"executionId,position,name,status,detail,tool,metadata,startedAt,completedAt,updatedAt"}, "order": {"position.asc"}, "limit": {"100"}}
+	var rows []studioExecutionStageRow
+	if _, err := m.api.request(ctx, http.MethodGet, "StudioExecutionStage", v, nil, "", &rows); err != nil {
+		return nil, err
+	}
+	out := make([]StudioExecutionStage, 0, len(rows))
+	for _, r := range rows {
+		out = append(out, executionStageFromRow(r))
+	}
+	return out, nil
 }
 
 func (m *StudioModel) ListWorkflows(ctx context.Context) ([]StudioWorkflow, error) {
@@ -156,11 +197,11 @@ func (m *StudioModel) FindExecution(ctx context.Context, id string) (*StudioExec
 	out := executionFromRow(rows[0])
 	return &out, nil
 }
-func (m *StudioModel) CreateExecution(ctx context.Context, workflowID, workflowName string) (*StudioExecution, error) {
+func (m *StudioModel) CreateExecution(ctx context.Context, workflowID, workflowName string, nodes []string) (*StudioExecution, error) {
 	now := time.Now().UTC().Format(time.RFC3339Nano)
-	body := map[string]any{"id": newID(), "workflowId": workflowID, "workflow": workflowName, "status": "running", "startedAt": now, "durationMs": 0, "cost": 0, "createdAt": now, "updatedAt": now}
+	body := map[string]any{"executionId": newID(), "workflowId": workflowID, "workflowName": workflowName, "nodes": nodes, "occurredAt": now}
 	var rows []studioExecutionRow
-	if _, err := m.api.request(ctx, http.MethodPost, "StudioExecution", url.Values{"select": {"*"}}, body, "return=representation", &rows); err != nil {
+	if _, err := m.api.request(ctx, http.MethodPost, "rpc/createStudioExecutionWithStages", nil, body, "", &rows); err != nil {
 		return nil, err
 	}
 	if len(rows) == 0 {

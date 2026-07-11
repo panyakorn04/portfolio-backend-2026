@@ -102,6 +102,12 @@ service portfolio-api {
 
 	@handler studioOverview
 	get /api/studio/overview
+
+	@handler studioExecutionStages
+	get /api/studio/executions/:id/stages
+
+	@handler studioExecutionEvents
+	get /api/studio/executions/:id/events
 }
 
 @server (

@@ -208,7 +208,7 @@ func AdminCreateStudioExecutionHandler(s *svc.ServiceContext) http.HandlerFunc {
 			response.Error(w, 409, "Only active workflows can be run.")
 			return
 		}
-		item, err := s.Studio.CreateExecution(r.Context(), workflow.ID, workflow.Name)
+		item, err := s.Studio.CreateExecution(r.Context(), workflow.ID, workflow.Name, workflow.Nodes)
 		if err != nil {
 			response.Error(w, 500, "Unable to create execution.")
 			return
