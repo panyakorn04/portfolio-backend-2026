@@ -87,6 +87,9 @@ service portfolio-api {
 
 	@handler articleBySlug
 	get /api/articles/:slug
+
+	@handler studioOverview
+	get /api/studio/overview
 }
 
 @server (

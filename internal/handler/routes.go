@@ -15,6 +15,7 @@ func RegisterHandlers(server *rest.Server, svcCtx *svc.ServiceContext) {
 		{Method: http.MethodPost, Path: "/api/contact", Handler: ContactHandler(svcCtx)},
 		{Method: http.MethodGet, Path: "/api/articles", Handler: ArticlesHandler(svcCtx)},
 		{Method: http.MethodGet, Path: "/api/articles/:slug", Handler: ArticleBySlugHandler(svcCtx)},
+		{Method: http.MethodGet, Path: "/api/studio/overview", Handler: StudioOverviewHandler()},
 
 		// Admin session
 		{Method: http.MethodGet, Path: "/api/admin/session", Handler: SessionStatusHandler(svcCtx)},

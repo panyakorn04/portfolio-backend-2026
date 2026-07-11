@@ -314,6 +314,7 @@ All responses use the shared envelope:
 | POST | `/api/contact` | public |
 | GET | `/api/articles` | public |
 | GET | `/api/articles/:slug` | public |
+| GET | `/api/studio/overview` | public, read-only portfolio demo model |
 | GET/POST/DELETE | `/api/admin/session` | session/bearer |
 | GET | `/api/admin/contact-inquiries` | admin |
 | GET/PATCH | `/api/admin/contact-inquiries/:id` | admin (PATCH: admin/editor) |
