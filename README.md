@@ -50,7 +50,7 @@ cp .env.example .env
 
 go mod tidy
 
-# Apply migrations in numeric order through 0005_studio_audit_log.sql.
+# Apply migrations in numeric order through 0006_studio_execution_create_audit.sql.
 
 # Create/update an admin user through Supabase REST
 set -a; source .env; set +a
@@ -77,6 +77,8 @@ Optional Redis article cache and distributed rate-limit env:
 
 `migrations/0003_studio.sql` adds `StudioWorkflow` and `StudioExecution`.
 `migrations/0005_studio_audit_log.sql` adds the append-only `StudioAuditLog`.
+`migrations/0006_studio_execution_create_audit.sql` additively permits the
+`execution.create` audit action without modifying an applied migration.
 The public `GET /api/studio/overview` reads these tables and deliberately returns
 the safe portfolio seed if Supabase is not configured, unreachable, or the new
 tables have not been migrated yet. It never returns database errors or secrets.
@@ -85,6 +87,7 @@ Authenticated staff routes (session cookie or bearer auth) are:
 
 - `GET /api/admin/studio/workflows` and `GET /api/admin/studio/executions` — all staff roles, including viewer.
 - `POST /api/admin/studio/workflows` and `PATCH /api/admin/studio/workflows/:id` — admin/editor only.
+- `POST /api/admin/studio/executions` with `{ "workflowId": "..." }` — admin/editor only; creates a persisted running execution for an existing active workflow and records `execution.create` in the audit log.
 - `POST /api/admin/studio/executions/:id/{pause|retry|cancel|approve}` — admin/editor only, with server-side status-transition validation.
 - `GET /api/admin/studio/audit-logs` — all staff roles; newest 50 mutation events.
 

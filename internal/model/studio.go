@@ -156,6 +156,19 @@ func (m *StudioModel) FindExecution(ctx context.Context, id string) (*StudioExec
 	out := executionFromRow(rows[0])
 	return &out, nil
 }
+func (m *StudioModel) CreateExecution(ctx context.Context, workflowID, workflowName string) (*StudioExecution, error) {
+	now := time.Now().UTC().Format(time.RFC3339Nano)
+	body := map[string]any{"id": newID(), "workflowId": workflowID, "workflow": workflowName, "status": "running", "startedAt": now, "durationMs": 0, "cost": 0, "createdAt": now, "updatedAt": now}
+	var rows []studioExecutionRow
+	if _, err := m.api.request(ctx, http.MethodPost, "StudioExecution", url.Values{"select": {"*"}}, body, "return=representation", &rows); err != nil {
+		return nil, err
+	}
+	if len(rows) == 0 {
+		return nil, ErrNotFound
+	}
+	out := executionFromRow(rows[0])
+	return &out, nil
+}
 func (m *StudioModel) TransitionExecution(ctx context.Context, id, status string) (*StudioExecution, error) {
 	var rows []studioExecutionRow
 	v := url.Values{"id": {"eq." + id}, "select": {"*"}}

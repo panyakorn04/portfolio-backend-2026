@@ -78,6 +78,10 @@ type (
 		Status      string   `json:"status"`
 		Nodes       []string `json:"nodes"`
 	}
+
+	StudioExecutionRequest {
+		WorkflowID string `json:"workflowId"`
+	}
 )
 
 @server (
@@ -163,6 +167,9 @@ service portfolio-api {
 
 	@handler listStudioExecutions
 	get /api/admin/studio/executions
+
+	@handler createStudioExecution
+	post /api/admin/studio/executions (StudioExecutionRequest)
 
 	@handler listStudioAuditLogs
 	get /api/admin/studio/audit-logs

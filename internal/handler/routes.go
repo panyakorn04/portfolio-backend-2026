@@ -22,6 +22,7 @@ func RegisterHandlers(server *rest.Server, svcCtx *svc.ServiceContext) {
 		{Method: http.MethodPost, Path: "/api/admin/studio/workflows", Handler: AdminCreateStudioWorkflowHandler(svcCtx)},
 		{Method: http.MethodPatch, Path: "/api/admin/studio/workflows/:id", Handler: AdminUpdateStudioWorkflowHandler(svcCtx)},
 		{Method: http.MethodGet, Path: "/api/admin/studio/executions", Handler: AdminListStudioExecutionsHandler(svcCtx)},
+		{Method: http.MethodPost, Path: "/api/admin/studio/executions", Handler: AdminCreateStudioExecutionHandler(svcCtx)},
 		{Method: http.MethodGet, Path: "/api/admin/studio/audit-logs", Handler: AdminListStudioAuditsHandler(svcCtx)},
 		{Method: http.MethodPost, Path: "/api/admin/studio/executions/:id/pause", Handler: AdminStudioExecutionActionHandler(svcCtx, "pause")},
 		{Method: http.MethodPost, Path: "/api/admin/studio/executions/:id/retry", Handler: AdminStudioExecutionActionHandler(svcCtx, "retry")},

@@ -7,6 +7,7 @@ import (
 	"strings"
 	"testing"
 
+	"portfolio-backend/internal/config"
 	"portfolio-backend/internal/model"
 	"portfolio-backend/internal/svc"
 )
@@ -48,6 +49,37 @@ func TestStudioOverviewHandlerFallsBackWhenTablesUnavailable(t *testing.T) {
 	StudioOverviewHandler(svcCtx).ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/api/studio/overview", nil))
 	if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), "wf-content") {
 		t.Fatalf("expected safe seed fallback, status=%d body=%s", rec.Code, rec.Body.String())
+	}
+}
+
+func TestAdminCreateStudioExecutionPersistsAndAuditsActiveWorkflow(t *testing.T) {
+	var executionBody, auditBody map[string]any
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch r.URL.Path {
+		case "/rest/v1/StudioWorkflow":
+			_, _ = w.Write([]byte(`[{"id":"wf-1","name":"Active Flow","description":"Demo","category":"Ops","status":"active","runs":0,"success":0,"nodes":["Start"],"createdAt":"2026-01-01T00:00:00Z","updatedAt":"2026-01-01T00:00:00Z"}]`))
+		case "/rest/v1/StudioExecution":
+			_ = json.NewDecoder(r.Body).Decode(&executionBody)
+			_, _ = w.Write([]byte(`[{"id":"run-1","workflowId":"wf-1","workflow":"Active Flow","status":"running","startedAt":"2026-07-11T10:00:00Z","durationMs":0,"cost":0,"createdAt":"2026-07-11T10:00:00Z","updatedAt":"2026-07-11T10:00:00Z"}]`))
+		case "/rest/v1/StudioAuditLog":
+			_ = json.NewDecoder(r.Body).Decode(&auditBody)
+			_, _ = w.Write([]byte(`[{"id":"audit-1","actorType":"bearer","actorId":null,"actorLabel":"admin bearer","action":"execution.create","resourceType":"execution","resourceId":"run-1","fromStatus":null,"toStatus":"running","metadata":{},"createdAt":"2026-07-11T10:00:00Z"}]`))
+		default:
+			t.Fatalf("unexpected persistence path %s", r.URL.Path)
+		}
+	}))
+	defer server.Close()
+	s := &svc.ServiceContext{Config: config.Config{AdminApiToken: "test-token"}, HasDatabse: true, Studio: model.NewStudioModel(model.NewSupabaseREST(server.URL, "key"))}
+	req := httptest.NewRequest(http.MethodPost, "/api/admin/studio/executions", strings.NewReader(`{"workflowId":"wf-1"}`))
+	req.Header.Set("Authorization", "Bearer test-token")
+	rec := httptest.NewRecorder()
+	AdminCreateStudioExecutionHandler(s).ServeHTTP(rec, req)
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("status=%d body=%s", rec.Code, rec.Body.String())
+	}
+	if executionBody["workflow"] != "Active Flow" || executionBody["status"] != "running" || auditBody["action"] != "execution.create" || auditBody["resourceId"] != "run-1" {
+		t.Fatalf("execution=%#v audit=%#v", executionBody, auditBody)
 	}
 }
 

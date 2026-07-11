@@ -52,6 +52,10 @@ type studioWorkflowPayload struct {
 	Nodes       []string `json:"nodes"`
 }
 
+type studioExecutionPayload struct {
+	WorkflowID string `json:"workflowId"`
+}
+
 var workflowStatuses = map[string]bool{"active": true, "draft": true, "paused": true}
 var executionTransitions = map[string]map[string]bool{
 	"running": {"paused": true, "cancelled": true}, "paused": {"running": true, "cancelled": true},
@@ -168,6 +172,53 @@ func AdminListStudioExecutionsHandler(s *svc.ServiceContext) http.HandlerFunc {
 			return
 		}
 		response.Ok(w, 200, items)
+	}
+}
+func AdminCreateStudioExecutionHandler(s *svc.ServiceContext) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		access, ok := requireAdmin(w, r, s)
+		if !ok {
+			return
+		}
+		if !assertRole(w, access, []string{"admin", "editor"}) || !requireStudioDB(w, s) {
+			return
+		}
+		if !enforceStudioMutationRateLimit(w, r, s, access) {
+			return
+		}
+		var p studioExecutionPayload
+		if !decodeJSON(w, r, &p) {
+			return
+		}
+		p.WorkflowID = strings.TrimSpace(p.WorkflowID)
+		if p.WorkflowID == "" || len([]rune(p.WorkflowID)) > 128 {
+			response.Error(w, 400, "workflowId is required and must not exceed 128 characters.")
+			return
+		}
+		workflow, err := s.Studio.FindWorkflow(r.Context(), p.WorkflowID)
+		if err != nil {
+			response.Error(w, 500, "Unable to load workflow.")
+			return
+		}
+		if workflow == nil {
+			response.Error(w, 404, "Workflow was not found.")
+			return
+		}
+		if workflow.Status != "active" {
+			response.Error(w, 409, "Only active workflows can be run.")
+			return
+		}
+		item, err := s.Studio.CreateExecution(r.Context(), workflow.ID, workflow.Name)
+		if err != nil {
+			response.Error(w, 500, "Unable to create execution.")
+			return
+		}
+		if _, err := s.Studio.CreateAudit(r.Context(), studioAuditInput(r, s, access, "execution.create", "execution", item.ID, "", item.Status)); err != nil {
+			log.Printf("studio audit persistence failed: %v", err)
+			response.Error(w, 500, "Execution created but its audit record could not be saved.")
+			return
+		}
+		response.Ok(w, 201, item)
 	}
 }
 func AdminListStudioAuditsHandler(s *svc.ServiceContext) http.HandlerFunc {
