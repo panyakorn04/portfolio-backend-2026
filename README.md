@@ -50,8 +50,7 @@ cp .env.example .env
 
 go mod tidy
 
-# Apply migrations/0001_init.sql through migrations/0003_studio.sql in numeric
-# order in the Supabase SQL editor (0002/0003 are additive for existing DBs).
+# Apply migrations in numeric order through 0005_studio_audit_log.sql.
 
 # Create/update an admin user through Supabase REST
 set -a; source .env; set +a
@@ -67,14 +66,17 @@ Required Supabase env:
   the publishable key when the service role key is empty, but production should
   provide the service role key from server-side secrets only.
 
-Optional Redis article cache env:
+Optional Redis article cache and distributed rate-limit env:
 
 - `REDIS_URL`, for example `redis://localhost:6379/0`. Leave empty to disable.
 - `ARTICLE_CACHE_TTL_SECONDS`, defaults to 300 seconds when unset or invalid.
+- Set `TrustProxy: true` only behind a trusted proxy that overwrites
+  `X-Forwarded-For`/`X-Real-IP`; otherwise rate limits use the direct peer IP.
 
 ## Studio persistence and API
 
 `migrations/0003_studio.sql` adds `StudioWorkflow` and `StudioExecution`.
+`migrations/0005_studio_audit_log.sql` adds the append-only `StudioAuditLog`.
 The public `GET /api/studio/overview` reads these tables and deliberately returns
 the safe portfolio seed if Supabase is not configured, unreachable, or the new
 tables have not been migrated yet. It never returns database errors or secrets.
@@ -84,6 +86,15 @@ Authenticated staff routes (session cookie or bearer auth) are:
 - `GET /api/admin/studio/workflows` and `GET /api/admin/studio/executions` — all staff roles, including viewer.
 - `POST /api/admin/studio/workflows` and `PATCH /api/admin/studio/workflows/:id` — admin/editor only.
 - `POST /api/admin/studio/executions/:id/{pause|retry|cancel|approve}` — admin/editor only, with server-side status-transition validation.
+- `GET /api/admin/studio/audit-logs` — all staff roles; newest 50 mutation events.
+
+Login is limited to 5 attempts per direct client IP per 15 minutes. Studio
+mutations are limited to 30 per minute for both the client IP and authenticated
+session/bearer identity. A rejected request returns HTTP 429 and `Retry-After`.
+Redis provides cross-instance atomic counters when configured; a process-local
+limiter remains active if Redis is absent or temporarily unavailable. Audit
+metadata contains only IP, method, path, and a length-capped user agent—never
+passwords, cookies, authorization headers, or token hashes.
 
 All routes use the standard `{ "ok": true, "data": ... }` or
 `{ "ok": false, "error": ... }` response envelope.
@@ -331,6 +342,7 @@ All responses use the shared envelope:
 | GET | `/api/articles` | public |
 | GET | `/api/articles/:slug` | public |
 | GET | `/api/studio/overview` | public, read-only portfolio demo model |
+| GET | `/api/admin/studio/audit-logs` | staff (admin/editor/viewer) |
 | GET/POST/DELETE | `/api/admin/session` | session/bearer |
 | GET | `/api/admin/contact-inquiries` | admin |
 | GET/PATCH | `/api/admin/contact-inquiries/:id` | admin (PATCH: admin/editor) |

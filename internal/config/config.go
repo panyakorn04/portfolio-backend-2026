@@ -15,6 +15,7 @@ type Config struct {
 
 	RedisURL               string `json:",optional"`
 	ArticleCacheTTLSeconds int    `json:",optional"`
+	TrustProxy             bool   `json:",optional"`
 
 	ContactWebhookURL    string `json:",optional"`
 	ContactWebhookSecret string `json:",optional"`

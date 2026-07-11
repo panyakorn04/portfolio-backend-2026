@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 
+	"portfolio-backend/internal/auth"
 	"portfolio-backend/internal/model"
 	"portfolio-backend/internal/response"
 	"portfolio-backend/internal/svc"
@@ -169,6 +170,33 @@ func AdminListStudioExecutionsHandler(s *svc.ServiceContext) http.HandlerFunc {
 		response.Ok(w, 200, items)
 	}
 }
+func AdminListStudioAuditsHandler(s *svc.ServiceContext) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if _, ok := requireAdmin(w, r, s); !ok {
+			return
+		}
+		if !requireStudioDB(w, s) {
+			return
+		}
+		items, err := s.Studio.ListAudits(r.Context(), 50)
+		if err != nil {
+			response.Error(w, 500, "Unable to load Studio audit log.")
+			return
+		}
+		response.Ok(w, 200, items)
+	}
+}
+func studioAuditInput(r *http.Request, s *svc.ServiceContext, access *auth.AccessContext, action, resourceType, resourceID, from, to string) model.StudioAuditInput {
+	actorType, actorLabel, actorID := string(access.Via), "admin bearer", ""
+	if access.User != nil {
+		actorID, actorLabel = access.User.ID, access.User.Email
+	}
+	ua := r.UserAgent()
+	if len(ua) > 256 {
+		ua = ua[:256]
+	}
+	return model.StudioAuditInput{ActorType: actorType, ActorID: actorID, ActorLabel: actorLabel, Action: action, ResourceType: resourceType, ResourceID: resourceID, FromStatus: from, ToStatus: to, Metadata: map[string]any{"ip": clientIP(r, s.Config.TrustProxy), "method": r.Method, "path": r.URL.Path, "userAgent": ua}}
+}
 func AdminCreateStudioWorkflowHandler(s *svc.ServiceContext) http.HandlerFunc {
 	return studioWorkflowMutation(s, true)
 }
@@ -184,6 +212,9 @@ func studioWorkflowMutation(s *svc.ServiceContext, create bool) http.HandlerFunc
 		if !assertRole(w, access, []string{"admin", "editor"}) || !requireStudioDB(w, s) {
 			return
 		}
+		if !enforceStudioMutationRateLimit(w, r, s, access) {
+			return
+		}
 		var p studioWorkflowPayload
 		if !decodeJSON(w, r, &p) {
 			return
@@ -195,10 +226,21 @@ func studioWorkflowMutation(s *svc.ServiceContext, create bool) http.HandlerFunc
 		}
 		var item *model.StudioWorkflow
 		var err error
+		fromStatus := ""
 		if create {
 			item, err = s.Studio.CreateWorkflow(r.Context(), in)
 		} else {
-			item, err = s.Studio.UpdateWorkflow(r.Context(), pathParam(r, "id"), in)
+			current, findErr := s.Studio.FindWorkflow(r.Context(), pathParam(r, "id"))
+			if findErr != nil {
+				response.Error(w, 500, "Unable to load workflow.")
+				return
+			}
+			if current == nil {
+				response.Error(w, 404, "Workflow was not found.")
+				return
+			}
+			fromStatus = current.Status
+			item, err = s.Studio.UpdateWorkflow(r.Context(), current.ID, in)
 		}
 		if errors.Is(err, model.ErrNotFound) {
 			response.Error(w, 404, "Workflow was not found.")
@@ -212,6 +254,15 @@ func studioWorkflowMutation(s *svc.ServiceContext, create bool) http.HandlerFunc
 		if create {
 			code = 201
 		}
+		action := "workflow.update"
+		if create {
+			action = "workflow.create"
+		}
+		if _, err := s.Studio.CreateAudit(r.Context(), studioAuditInput(r, s, access, action, "workflow", item.ID, fromStatus, item.Status)); err != nil {
+			log.Printf("studio audit persistence failed: %v", err)
+			response.Error(w, 500, "Workflow changed but its audit record could not be saved.")
+			return
+		}
 		response.Ok(w, code, item)
 	}
 }
@@ -222,6 +273,9 @@ func AdminStudioExecutionActionHandler(s *svc.ServiceContext, action string) htt
 			return
 		}
 		if !assertRole(w, access, []string{"admin", "editor"}) || !requireStudioDB(w, s) {
+			return
+		}
+		if !enforceStudioMutationRateLimit(w, r, s, access) {
 			return
 		}
 		target := map[string]string{"pause": "paused", "retry": "running", "cancel": "cancelled", "approve": "approved"}[action]
@@ -241,6 +295,11 @@ func AdminStudioExecutionActionHandler(s *svc.ServiceContext, action string) htt
 		item, err := s.Studio.TransitionExecution(r.Context(), current.ID, target)
 		if err != nil {
 			response.Error(w, 500, "Unable to update execution.")
+			return
+		}
+		if _, err := s.Studio.CreateAudit(r.Context(), studioAuditInput(r, s, access, "execution."+action, "execution", item.ID, current.Status, item.Status)); err != nil {
+			log.Printf("studio audit persistence failed: %v", err)
+			response.Error(w, 500, "Execution changed but its audit record could not be saved.")
 			return
 		}
 		response.Ok(w, 200, item)

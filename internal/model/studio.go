@@ -132,6 +132,18 @@ func (m *StudioModel) UpdateWorkflow(ctx context.Context, id string, in StudioWo
 	out := workflowFromRow(rows[0])
 	return &out, nil
 }
+func (m *StudioModel) FindWorkflow(ctx context.Context, id string) (*StudioWorkflow, error) {
+	var rows []studioWorkflowRow
+	v := url.Values{"id": {"eq." + id}, "select": {"*"}, "limit": {"1"}}
+	if _, err := m.api.request(ctx, http.MethodGet, "StudioWorkflow", v, nil, "", &rows); err != nil {
+		return nil, err
+	}
+	if len(rows) == 0 {
+		return nil, nil
+	}
+	out := workflowFromRow(rows[0])
+	return &out, nil
+}
 func (m *StudioModel) FindExecution(ctx context.Context, id string) (*StudioExecution, error) {
 	var rows []studioExecutionRow
 	v := url.Values{"id": {"eq." + id}, "select": {"*"}, "limit": {"1"}}

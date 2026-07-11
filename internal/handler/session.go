@@ -39,6 +39,9 @@ func SessionStatusHandler(svcCtx *svc.ServiceContext) http.HandlerFunc {
 // SessionLoginHandler -> POST /api/admin/session
 func SessionLoginHandler(svcCtx *svc.ServiceContext) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
+		if !enforceLoginRateLimit(w, r, svcCtx) {
+			return
+		}
 		var body struct {
 			Email    string `json:"email"`
 			Password string `json:"password"`
