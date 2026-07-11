@@ -21,6 +21,7 @@ type ServiceContext struct {
 	SupabaseArticles      *model.SupabaseArticleClient
 	PortfolioChatSessions *model.PortfolioChatSessionModel
 	PortfolioChatMessages *model.PortfolioChatMessageModel
+	Studio                *model.StudioModel
 	Ollama                *model.OllamaClient
 	AISkills              *model.AISkillProfileStore
 	HasDatabse            bool
@@ -57,6 +58,7 @@ func NewServiceContext(c config.Config) (*ServiceContext, error) {
 	svc.Articles = model.NewArticleModel(svc.Supabase)
 	svc.PortfolioChatSessions = model.NewPortfolioChatSessionModel(svc.Supabase)
 	svc.PortfolioChatMessages = model.NewPortfolioChatMessageModel(svc.Supabase)
+	svc.Studio = model.NewStudioModel(svc.Supabase)
 
 	return svc, nil
 }

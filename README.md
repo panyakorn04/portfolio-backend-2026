@@ -18,7 +18,7 @@ and calls this service over HTTP.
 .
 ├── etc/portfolio-api.yaml     # config (reads ${ENV} placeholders)
 ├── portfolio.api              # go-zero API spec (reference for goctl)
-├── migrations/0001_init.sql   # optional bootstrap schema for a brand-new Supabase project
+├── migrations/                # additive Supabase schema migrations (apply in numeric order)
 ├── cmd/createuser/            # CLI to create/update a staff user via Supabase REST
 ├── internal/
 │   ├── config/                # config struct
@@ -50,8 +50,8 @@ cp .env.example .env
 
 go mod tidy
 
-# Optional only for a brand-new Supabase database:
-# apply migrations/0001_init.sql in the Supabase SQL editor.
+# Apply migrations/0001_init.sql through migrations/0003_studio.sql in numeric
+# order in the Supabase SQL editor (0002/0003 are additive for existing DBs).
 
 # Create/update an admin user through Supabase REST
 set -a; source .env; set +a
@@ -71,6 +71,22 @@ Optional Redis article cache env:
 
 - `REDIS_URL`, for example `redis://localhost:6379/0`. Leave empty to disable.
 - `ARTICLE_CACHE_TTL_SECONDS`, defaults to 300 seconds when unset or invalid.
+
+## Studio persistence and API
+
+`migrations/0003_studio.sql` adds `StudioWorkflow` and `StudioExecution`.
+The public `GET /api/studio/overview` reads these tables and deliberately returns
+the safe portfolio seed if Supabase is not configured, unreachable, or the new
+tables have not been migrated yet. It never returns database errors or secrets.
+
+Authenticated staff routes (session cookie or bearer auth) are:
+
+- `GET /api/admin/studio/workflows` and `GET /api/admin/studio/executions` — all staff roles, including viewer.
+- `POST /api/admin/studio/workflows` and `PATCH /api/admin/studio/workflows/:id` — admin/editor only.
+- `POST /api/admin/studio/executions/:id/{pause|retry|cancel|approve}` — admin/editor only, with server-side status-transition validation.
+
+All routes use the standard `{ "ok": true, "data": ... }` or
+`{ "ok": false, "error": ... }` response envelope.
 
 ## Run
 

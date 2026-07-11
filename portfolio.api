@@ -70,6 +70,14 @@ type (
 		Model   string `json:"model,optional"`
 		Verbose bool   `json:"verbose,optional"`
 	}
+
+	StudioWorkflowRequest {
+		Name        string   `json:"name"`
+		Description string   `json:"description"`
+		Category    string   `json:"category"`
+		Status      string   `json:"status"`
+		Nodes       []string `json:"nodes"`
+	}
 )
 
 @server (
@@ -143,6 +151,30 @@ service portfolio-api {
 
 	@handler deleteArticle
 	delete /api/admin/articles/:id
+
+	@handler listStudioWorkflows
+	get /api/admin/studio/workflows
+
+	@handler createStudioWorkflow
+	post /api/admin/studio/workflows (StudioWorkflowRequest)
+
+	@handler updateStudioWorkflow
+	patch /api/admin/studio/workflows/:id (StudioWorkflowRequest)
+
+	@handler listStudioExecutions
+	get /api/admin/studio/executions
+
+	@handler pauseStudioExecution
+	post /api/admin/studio/executions/:id/pause
+
+	@handler retryStudioExecution
+	post /api/admin/studio/executions/:id/retry
+
+	@handler cancelStudioExecution
+	post /api/admin/studio/executions/:id/cancel
+
+	@handler approveStudioExecution
+	post /api/admin/studio/executions/:id/approve
 }
 
 @server (

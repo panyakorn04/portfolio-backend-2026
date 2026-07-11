@@ -15,7 +15,17 @@ func RegisterHandlers(server *rest.Server, svcCtx *svc.ServiceContext) {
 		{Method: http.MethodPost, Path: "/api/contact", Handler: ContactHandler(svcCtx)},
 		{Method: http.MethodGet, Path: "/api/articles", Handler: ArticlesHandler(svcCtx)},
 		{Method: http.MethodGet, Path: "/api/articles/:slug", Handler: ArticleBySlugHandler(svcCtx)},
-		{Method: http.MethodGet, Path: "/api/studio/overview", Handler: StudioOverviewHandler()},
+		{Method: http.MethodGet, Path: "/api/studio/overview", Handler: StudioOverviewHandler(svcCtx)},
+
+		// Admin Studio (viewer may list; admin/editor may mutate)
+		{Method: http.MethodGet, Path: "/api/admin/studio/workflows", Handler: AdminListStudioWorkflowsHandler(svcCtx)},
+		{Method: http.MethodPost, Path: "/api/admin/studio/workflows", Handler: AdminCreateStudioWorkflowHandler(svcCtx)},
+		{Method: http.MethodPatch, Path: "/api/admin/studio/workflows/:id", Handler: AdminUpdateStudioWorkflowHandler(svcCtx)},
+		{Method: http.MethodGet, Path: "/api/admin/studio/executions", Handler: AdminListStudioExecutionsHandler(svcCtx)},
+		{Method: http.MethodPost, Path: "/api/admin/studio/executions/:id/pause", Handler: AdminStudioExecutionActionHandler(svcCtx, "pause")},
+		{Method: http.MethodPost, Path: "/api/admin/studio/executions/:id/retry", Handler: AdminStudioExecutionActionHandler(svcCtx, "retry")},
+		{Method: http.MethodPost, Path: "/api/admin/studio/executions/:id/cancel", Handler: AdminStudioExecutionActionHandler(svcCtx, "cancel")},
+		{Method: http.MethodPost, Path: "/api/admin/studio/executions/:id/approve", Handler: AdminStudioExecutionActionHandler(svcCtx, "approve")},
 
 		// Admin session
 		{Method: http.MethodGet, Path: "/api/admin/session", Handler: SessionStatusHandler(svcCtx)},
