@@ -35,6 +35,15 @@ func TestStudioModelCreateExecutionPersistsRunningRun(t *testing.T) {
 	}
 }
 
+func TestWorkflowBodyClearsStaleDefinitionForLegacyPayload(t *testing.T) {
+	body := workflowBody(StudioWorkflowInput{Name: "Legacy", Nodes: []string{"Trigger"}})
+	definition, exists := body["definition"]
+	typed, typedOK := definition.(*StudioWorkflowDefinition)
+	if !exists || !typedOK || typed != nil {
+		t.Fatalf("legacy updates must explicitly clear stale definitions: %#v", body)
+	}
+}
+
 func TestStudioModelListOverviewAndUpdateExecution(t *testing.T) {
 	var patched map[string]any
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

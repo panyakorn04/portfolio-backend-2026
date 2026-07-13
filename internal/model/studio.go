@@ -11,17 +11,41 @@ type StudioModel struct{ api *SupabaseREST }
 
 func NewStudioModel(api *SupabaseREST) *StudioModel { return &StudioModel{api: api} }
 
+type StudioPosition struct {
+	X float64 `json:"x"`
+	Y float64 `json:"y"`
+}
+type StudioWorkflowNode struct {
+	ID       string         `json:"id"`
+	Type     string         `json:"type"`
+	Kind     string         `json:"kind"`
+	Label    string         `json:"label"`
+	Position StudioPosition `json:"position"`
+	Config   map[string]any `json:"config"`
+}
+type StudioWorkflowEdge struct {
+	ID     string `json:"id"`
+	Source string `json:"source"`
+	Target string `json:"target"`
+}
+type StudioWorkflowDefinition struct {
+	Version int                  `json:"version"`
+	Nodes   []StudioWorkflowNode `json:"nodes"`
+	Edges   []StudioWorkflowEdge `json:"edges"`
+}
+
 type StudioWorkflow struct {
-	ID          string    `json:"id"`
-	Name        string    `json:"name"`
-	Description string    `json:"description"`
-	Category    string    `json:"category"`
-	Status      string    `json:"status"`
-	Runs        int       `json:"runs"`
-	Success     float64   `json:"success"`
-	Nodes       []string  `json:"nodes"`
-	CreatedAt   time.Time `json:"createdAt"`
-	UpdatedAt   time.Time `json:"updatedAt"`
+	ID          string                    `json:"id"`
+	Name        string                    `json:"name"`
+	Description string                    `json:"description"`
+	Category    string                    `json:"category"`
+	Status      string                    `json:"status"`
+	Runs        int                       `json:"runs"`
+	Success     float64                   `json:"success"`
+	Nodes       []string                  `json:"nodes"`
+	Definition  *StudioWorkflowDefinition `json:"definition,omitempty"`
+	CreatedAt   time.Time                 `json:"createdAt"`
+	UpdatedAt   time.Time                 `json:"updatedAt"`
 }
 
 type StudioExecution struct {
@@ -52,19 +76,21 @@ type StudioExecutionStage struct {
 type StudioWorkflowInput struct {
 	Name, Description, Category, Status string
 	Nodes                               []string
+	Definition                          *StudioWorkflowDefinition
 }
 
 type studioWorkflowRow struct {
-	ID          string   `json:"id"`
-	Name        string   `json:"name"`
-	Description string   `json:"description"`
-	Category    string   `json:"category"`
-	Status      string   `json:"status"`
-	CreatedAt   string   `json:"createdAt"`
-	UpdatedAt   string   `json:"updatedAt"`
-	Runs        int      `json:"runs"`
-	Success     float64  `json:"success"`
-	Nodes       []string `json:"nodes"`
+	ID          string                    `json:"id"`
+	Name        string                    `json:"name"`
+	Description string                    `json:"description"`
+	Category    string                    `json:"category"`
+	Status      string                    `json:"status"`
+	CreatedAt   string                    `json:"createdAt"`
+	UpdatedAt   string                    `json:"updatedAt"`
+	Runs        int                       `json:"runs"`
+	Success     float64                   `json:"success"`
+	Nodes       []string                  `json:"nodes"`
+	Definition  *StudioWorkflowDefinition `json:"definition"`
 }
 type studioExecutionRow struct {
 	ID         string  `json:"id"`
@@ -92,7 +118,7 @@ type studioExecutionStageRow struct {
 }
 
 func workflowFromRow(r studioWorkflowRow) StudioWorkflow {
-	return StudioWorkflow{ID: r.ID, Name: r.Name, Description: r.Description, Category: r.Category, Status: r.Status, Runs: r.Runs, Success: r.Success, Nodes: r.Nodes, CreatedAt: timeFromString(r.CreatedAt), UpdatedAt: timeFromString(r.UpdatedAt)}
+	return StudioWorkflow{ID: r.ID, Name: r.Name, Description: r.Description, Category: r.Category, Status: r.Status, Runs: r.Runs, Success: r.Success, Nodes: r.Nodes, Definition: r.Definition, CreatedAt: timeFromString(r.CreatedAt), UpdatedAt: timeFromString(r.UpdatedAt)}
 }
 func executionFromRow(r studioExecutionRow) StudioExecution {
 	return StudioExecution{ID: r.ID, WorkflowID: r.WorkflowID, Workflow: r.Workflow, Status: r.Status, StartedAt: timeFromString(r.StartedAt), DurationMS: r.DurationMS, Cost: r.Cost, CreatedAt: timeFromString(r.CreatedAt), UpdatedAt: timeFromString(r.UpdatedAt)}
@@ -146,7 +172,7 @@ func (m *StudioModel) Overview(ctx context.Context) ([]StudioWorkflow, []StudioE
 	return w, e, err
 }
 func workflowBody(in StudioWorkflowInput) map[string]any {
-	return map[string]any{"name": in.Name, "description": in.Description, "category": in.Category, "status": in.Status, "nodes": in.Nodes, "updatedAt": time.Now().UTC().Format(time.RFC3339)}
+	return map[string]any{"name": in.Name, "description": in.Description, "category": in.Category, "status": in.Status, "nodes": in.Nodes, "definition": in.Definition, "updatedAt": time.Now().UTC().Format(time.RFC3339)}
 }
 func (m *StudioModel) CreateWorkflow(ctx context.Context, in StudioWorkflowInput) (*StudioWorkflow, error) {
 	body := workflowBody(in)

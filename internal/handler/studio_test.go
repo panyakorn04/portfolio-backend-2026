@@ -94,6 +94,36 @@ func TestValidateStudioWorkflowAndTransitions(t *testing.T) {
 	if message != "" || input.Nodes[0] != "A" {
 		t.Fatalf("input=%#v message=%q", input, message)
 	}
+
+	definition := &model.StudioWorkflowDefinition{Version: 1, Nodes: []model.StudioWorkflowNode{{
+		ID: "node-0", Type: "schedule", Kind: "trigger", Label: "Schedule",
+		Position: model.StudioPosition{X: 0, Y: 0},
+		Config:   map[string]any{"enabled": true, "mode": "daily", "timezone": "Asia/Bangkok", "time": "09:00", "misfirePolicy": "skip"},
+	}}}
+	input, message = validateStudioWorkflow(studioWorkflowPayload{Name: "Flow", Category: "Content", Status: "active", Nodes: []string{"Schedule"}, Definition: definition})
+	if message != "" || input.Definition == nil || input.Nodes[0] != "Schedule" {
+		t.Fatalf("definition input=%#v message=%q", input, message)
+	}
+	definition.Nodes[0].Config["enabled"] = false
+	if _, message = validateStudioWorkflow(studioWorkflowPayload{Name: "Flow", Category: "Content", Status: "active", Nodes: []string{"Schedule"}, Definition: definition}); message != "" {
+		t.Fatalf("disabled schedule should remain a valid configuration: %s", message)
+	}
+	definition.Nodes[0].Config["enabled"] = true
+	definition.Nodes = append(definition.Nodes, model.StudioWorkflowNode{ID: "node-1", Type: "transform", Kind: "action", Label: "Transform", Position: model.StudioPosition{X: -100, Y: 0}, Config: map[string]any{}})
+	if _, message = validateStudioWorkflow(studioWorkflowPayload{Name: "Flow", Category: "Content", Status: "active", Nodes: []string{"Transform", "Schedule"}, Definition: definition}); message == "" {
+		t.Fatal("expected left-most trigger validation")
+	}
+	definition.Nodes = definition.Nodes[:1]
+
+	definition.Nodes[0].Config["timezone"] = "Not/AZone"
+	if _, message = validateStudioWorkflow(studioWorkflowPayload{Name: "Flow", Category: "Content", Status: "active", Nodes: []string{"Schedule"}, Definition: definition}); message == "" {
+		t.Fatal("expected invalid timezone validation")
+	}
+	definition.Nodes[0].Config["timezone"] = "Asia/Bangkok"
+	definition.Nodes[0].Config["auth"] = map[string]any{"apiToken": "must-not-persist"}
+	if _, message = validateStudioWorkflow(studioWorkflowPayload{Name: "Flow", Category: "Content", Status: "active", Nodes: []string{"Schedule"}, Definition: definition}); message == "" {
+		t.Fatal("expected nested credential validation")
+	}
 	if !executionTransitions["failed"]["running"] || executionTransitions["completed"]["running"] {
 		t.Fatal("retry transition rules are incorrect")
 	}

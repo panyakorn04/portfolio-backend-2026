@@ -1,10 +1,13 @@
 package handler
 
 import (
+	"encoding/json"
 	"errors"
 	"fmt"
 	"log"
+	"math"
 	"net/http"
+	"sort"
 	"strings"
 	"time"
 
@@ -45,11 +48,12 @@ type studioOverview struct {
 	Stages     []studioStage           `json:"stages"`
 }
 type studioWorkflowPayload struct {
-	Name        string   `json:"name"`
-	Description string   `json:"description"`
-	Category    string   `json:"category"`
-	Status      string   `json:"status"`
-	Nodes       []string `json:"nodes"`
+	Name        string                          `json:"name"`
+	Description string                          `json:"description"`
+	Category    string                          `json:"category"`
+	Status      string                          `json:"status"`
+	Nodes       []string                        `json:"nodes"`
+	Definition  *model.StudioWorkflowDefinition `json:"definition"`
 }
 
 type studioExecutionPayload struct {
@@ -121,6 +125,24 @@ func validateStudioWorkflow(p studioWorkflowPayload) (model.StudioWorkflowInput,
 	if !workflowStatuses[p.Status] {
 		return model.StudioWorkflowInput{}, "Status must be active, draft, or paused."
 	}
+	if p.Definition != nil {
+		labels, message := validateWorkflowDefinition(p.Definition, p.Status == "active")
+		if message != "" {
+			return model.StudioWorkflowInput{}, message
+		}
+		if len(p.Nodes) > 0 {
+			for i := range p.Nodes {
+				p.Nodes[i] = strings.TrimSpace(p.Nodes[i])
+				if i >= len(labels) || p.Nodes[i] != labels[i] {
+					return model.StudioWorkflowInput{}, "Nodes must match the workflow definition."
+				}
+			}
+			if len(p.Nodes) != len(labels) {
+				return model.StudioWorkflowInput{}, "Nodes must match the workflow definition."
+			}
+		}
+		p.Nodes = labels
+	}
 	if len(p.Nodes) < 1 || len(p.Nodes) > 30 {
 		return model.StudioWorkflowInput{}, "Nodes must contain between 1 and 30 items."
 	}
@@ -130,7 +152,179 @@ func validateStudioWorkflow(p studioWorkflowPayload) (model.StudioWorkflowInput,
 			return model.StudioWorkflowInput{}, "Each node must be between 1 and 80 characters."
 		}
 	}
-	return model.StudioWorkflowInput{Name: p.Name, Description: p.Description, Category: p.Category, Status: p.Status, Nodes: p.Nodes}, ""
+	return model.StudioWorkflowInput{Name: p.Name, Description: p.Description, Category: p.Category, Status: p.Status, Nodes: p.Nodes, Definition: p.Definition}, ""
+}
+
+var studioNodeKinds = map[string]string{
+	"schedule": "trigger", "webhook": "trigger", "manual": "trigger",
+	"search": "action", "analyze": "action", "generate": "action", "extract": "action", "transform": "action",
+	"review": "logic", "approve": "logic", "condition": "logic", "route": "logic",
+	"publish": "output", "notify": "output", "sync": "output", "export": "output",
+}
+
+func validateWorkflowDefinition(definition *model.StudioWorkflowDefinition, requireComplete bool) ([]string, string) {
+	if definition.Version != 1 || len(definition.Nodes) < 1 || len(definition.Nodes) > 30 {
+		return nil, "Workflow definition must use version 1 and contain between 1 and 30 nodes."
+	}
+	encoded, err := json.Marshal(definition)
+	if err != nil || len(encoded) > 128*1024 {
+		return nil, "Workflow definition is invalid or too large."
+	}
+	ids := map[string]bool{}
+	triggerCount := 0
+	for _, node := range definition.Nodes {
+		expectedKind, ok := studioNodeKinds[node.Type]
+		if !ok || expectedKind != node.Kind {
+			return nil, "Workflow node type and kind are invalid."
+		}
+		if node.ID == "" || len(node.ID) > 128 || ids[node.ID] {
+			return nil, "Workflow node IDs must be unique and no longer than 128 characters."
+		}
+		ids[node.ID] = true
+		node.Label = strings.TrimSpace(node.Label)
+		if node.Label == "" || len([]rune(node.Label)) > 80 || math.IsNaN(node.Position.X) || math.IsInf(node.Position.X, 0) || math.IsNaN(node.Position.Y) || math.IsInf(node.Position.Y, 0) {
+			return nil, "Workflow node metadata is invalid."
+		}
+		if node.Kind == "trigger" {
+			triggerCount++
+		}
+
+		if containsCredentialConfig(node.Config) {
+			return nil, "Workflow config must not contain credentials or secrets."
+		}
+		if requireComplete && node.Type == "schedule" {
+			if message := validateScheduleConfig(node.Config); message != "" {
+				return nil, message
+			}
+		}
+	}
+	if triggerCount != 1 {
+		return nil, "Workflow definition must contain exactly one trigger."
+	}
+	for _, edge := range definition.Edges {
+		if edge.ID == "" || edge.Source == edge.Target || !ids[edge.Source] || !ids[edge.Target] {
+			return nil, "Workflow edges must reference existing nodes."
+		}
+	}
+	sorted := append([]model.StudioWorkflowNode(nil), definition.Nodes...)
+	sort.SliceStable(sorted, func(i, j int) bool { return sorted[i].Position.X < sorted[j].Position.X })
+	if sorted[0].Kind != "trigger" {
+		return nil, "The first workflow node must be a trigger."
+	}
+	labels := make([]string, len(sorted))
+	for i := range sorted {
+		labels[i] = strings.TrimSpace(sorted[i].Label)
+	}
+	return labels, ""
+}
+
+func containsCredentialConfig(value any) bool {
+	switch item := value.(type) {
+	case map[string]any:
+		for key, nested := range item {
+			lower := strings.ToLower(key)
+			if strings.Contains(lower, "secret") || strings.Contains(lower, "password") || strings.Contains(lower, "token") || strings.Contains(lower, "apikey") || strings.Contains(lower, "api_key") {
+				return true
+			}
+			if containsCredentialConfig(nested) {
+				return true
+			}
+		}
+	case []any:
+		for _, nested := range item {
+			if containsCredentialConfig(nested) {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+func configNumber(value any) (float64, bool) {
+	switch number := value.(type) {
+	case float64:
+		return number, true
+	case float32:
+		return float64(number), true
+	case int:
+		return float64(number), true
+	case int64:
+		return float64(number), true
+	default:
+		return 0, false
+	}
+}
+
+func validWeekdays(value any) bool {
+	seen := map[int]bool{}
+	add := func(day int) bool {
+		if day < 0 || day > 6 || seen[day] {
+			return false
+		}
+		seen[day] = true
+		return true
+	}
+	switch days := value.(type) {
+	case []any:
+		for _, raw := range days {
+			number, ok := configNumber(raw)
+			if !ok || number != math.Trunc(number) || !add(int(number)) {
+				return false
+			}
+		}
+	case []int:
+		for _, day := range days {
+			if !add(day) {
+				return false
+			}
+		}
+	default:
+		return false
+	}
+	return len(seen) > 0
+}
+
+func validateScheduleConfig(config map[string]any) string {
+	if _, ok := config["enabled"].(bool); !ok {
+		return "Schedule enabled must be true or false."
+	}
+	mode, _ := config["mode"].(string)
+	timezone, _ := config["timezone"].(string)
+	misfire, _ := config["misfirePolicy"].(string)
+	if _, err := time.LoadLocation(timezone); err != nil {
+		return "Schedule timezone must be a valid IANA timezone."
+	}
+	if misfire != "skip" && misfire != "run-once" {
+		return "Schedule misfire policy must be skip or run-once."
+	}
+	switch mode {
+	case "interval":
+		minutes, ok := configNumber(config["intervalMinutes"])
+		if !ok || minutes != math.Trunc(minutes) || minutes < 1 || minutes > 43200 {
+			return "Schedule interval must be between 1 and 43,200 minutes."
+		}
+	case "daily":
+		clock, _ := config["time"].(string)
+		if _, err := time.Parse("15:04", clock); err != nil {
+			return "Schedule time must use HH:mm in 24-hour format."
+		}
+	case "weekly":
+		clock, _ := config["time"].(string)
+		if _, err := time.Parse("15:04", clock); err != nil {
+			return "Schedule time must use HH:mm in 24-hour format."
+		}
+		if !validWeekdays(config["daysOfWeek"]) {
+			return "Weekly schedules must select at least one valid day."
+		}
+	case "cron":
+		expression, _ := config["cronExpression"].(string)
+		if len(strings.Fields(expression)) != 5 {
+			return "Schedule cron expression must contain 5 fields."
+		}
+	default:
+		return "Schedule mode must be interval, daily, weekly, or cron."
+	}
+	return ""
 }
 func requireStudioDB(w http.ResponseWriter, s *svc.ServiceContext) bool {
 	if !requireDatabase(w, s) {
@@ -156,6 +350,31 @@ func AdminListStudioWorkflowsHandler(s *svc.ServiceContext) http.HandlerFunc {
 			return
 		}
 		response.Ok(w, 200, items)
+	}
+}
+func AdminGetStudioWorkflowHandler(s *svc.ServiceContext) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if _, ok := requireAdmin(w, r, s); !ok {
+			return
+		}
+		if !requireStudioDB(w, s) {
+			return
+		}
+		id := strings.TrimSpace(pathParam(r, "id"))
+		if id == "" || len(id) > 128 {
+			response.Error(w, http.StatusBadRequest, "Workflow id is required.")
+			return
+		}
+		item, err := s.Studio.FindWorkflow(r.Context(), id)
+		if err != nil {
+			response.Error(w, http.StatusInternalServerError, "Unable to load workflow.")
+			return
+		}
+		if item == nil {
+			response.Error(w, http.StatusNotFound, "Workflow was not found.")
+			return
+		}
+		response.Ok(w, http.StatusOK, item)
 	}
 }
 func AdminListStudioExecutionsHandler(s *svc.ServiceContext) http.HandlerFunc {
