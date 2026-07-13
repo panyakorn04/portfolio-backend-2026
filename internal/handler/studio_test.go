@@ -74,9 +74,36 @@ func TestAdminExecuteStudioManualTriggerReturnsJSONOutput(t *testing.T) {
 	req = pathvar.WithVars(req, map[string]string{"id": "wf-1", "nodeId": "manual"})
 	req.Header.Set("Authorization", "Bearer test-token")
 	rec := httptest.NewRecorder()
-	AdminExecuteStudioManualTriggerHandler(s).ServeHTTP(rec, req)
+	AdminExecuteStudioTriggerHandler(s).ServeHTTP(rec, req)
 	if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), `"trigger":"manual"`) || auditBody["action"] != "node.execute" {
 		t.Fatalf("status=%d body=%s audit=%#v", rec.Code, rec.Body.String(), auditBody)
+	}
+}
+
+func TestAdminExecuteStudioScheduleTriggerReturnsJSONOutput(t *testing.T) {
+	var auditBody map[string]any
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch r.URL.Path {
+		case "/rest/v1/StudioWorkflow":
+			_, _ = w.Write([]byte(`[{"id":"wf-1","name":"Scheduled Flow","description":"Demo","category":"Ops","status":"draft","runs":0,"success":0,"nodes":["Schedule","Transform"],"definition":{"version":1,"nodes":[{"id":"schedule","type":"schedule","kind":"trigger","label":"Schedule","position":{"x":0,"y":0},"config":{"enabled":true,"mode":"cron","timezone":"Asia/Bangkok","cronExpression":"0 12,20 * * *","misfirePolicy":"skip"}},{"id":"transform","type":"transform","kind":"action","label":"Transform","position":{"x":200,"y":0},"config":{}}],"edges":[{"id":"edge-schedule-transform","source":"schedule","target":"transform"}]},"createdAt":"2026-01-01T00:00:00Z","updatedAt":"2026-01-01T00:00:00Z"}]`))
+		case "/rest/v1/StudioAuditLog":
+			_ = json.NewDecoder(r.Body).Decode(&auditBody)
+			_, _ = w.Write([]byte(`[{"id":"audit-1","actorType":"bearer","actorLabel":"admin bearer","action":"node.execute","resourceType":"workflow-node","resourceId":"schedule","metadata":{},"createdAt":"2026-07-13T12:00:00Z"}]`))
+		default:
+			t.Fatalf("unexpected persistence path %s", r.URL.Path)
+		}
+	}))
+	defer server.Close()
+	s := &svc.ServiceContext{Config: config.Config{AdminApiToken: "test-token"}, HasDatabse: true, Studio: model.NewStudioModel(model.NewSupabaseREST(server.URL, "key"))}
+	req := httptest.NewRequest(http.MethodPost, "/api/admin/studio/workflows/wf-1/nodes/schedule/execute", nil)
+	req = pathvar.WithVars(req, map[string]string{"id": "wf-1", "nodeId": "schedule"})
+	req.Header.Set("Authorization", "Bearer test-token")
+	rec := httptest.NewRecorder()
+	AdminExecuteStudioTriggerHandler(s).ServeHTTP(rec, req)
+	body := rec.Body.String()
+	if rec.Code != http.StatusOK || !strings.Contains(body, `"trigger":"schedule"`) || !strings.Contains(body, `"timezone":"Asia/Bangkok"`) || auditBody["action"] != "node.execute" {
+		t.Fatalf("status=%d body=%s audit=%#v", rec.Code, body, auditBody)
 	}
 }
 

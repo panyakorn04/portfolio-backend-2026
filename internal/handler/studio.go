@@ -61,7 +61,7 @@ type studioExecutionPayload struct {
 	WorkflowID string `json:"workflowId"`
 }
 
-type studioManualTriggerOutput struct {
+type studioTriggerOutput struct {
 	NodeID     string                      `json:"nodeId"`
 	NodeType   string                      `json:"nodeType"`
 	ExecutedAt string                      `json:"executedAt"`
@@ -506,7 +506,7 @@ func AdminListStudioExecutionsHandler(s *svc.ServiceContext) http.HandlerFunc {
 		response.Ok(w, 200, items)
 	}
 }
-func AdminExecuteStudioManualTriggerHandler(s *svc.ServiceContext) http.HandlerFunc {
+func AdminExecuteStudioTriggerHandler(s *svc.ServiceContext) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		access, ok := requireAdmin(w, r, s)
 		if !ok {
@@ -541,36 +541,47 @@ func AdminExecuteStudioManualTriggerHandler(s *svc.ServiceContext) http.HandlerF
 			response.Error(w, http.StatusConflict, "Save a structured workflow definition before executing a node.")
 			return
 		}
-		var manualNode *model.StudioWorkflowNode
+		var triggerNode *model.StudioWorkflowNode
 		for index := range workflow.Definition.Nodes {
 			node := &workflow.Definition.Nodes[index]
 			if node.ID == nodeID {
-				manualNode = node
+				triggerNode = node
 				break
 			}
 		}
-		if manualNode == nil {
+		if triggerNode == nil {
 			response.Error(w, http.StatusNotFound, "Workflow node was not found.")
 			return
 		}
-		if manualNode.Type != "manual" || manualNode.Kind != "trigger" {
-			response.Error(w, http.StatusBadRequest, "Only Manual Trigger nodes support Execute step.")
+		if triggerNode.Kind != "trigger" || !map[string]bool{"manual": true, "schedule": true, "webhook": true}[triggerNode.Type] {
+			response.Error(w, http.StatusBadRequest, "Only workflow trigger nodes support Execute step.")
 			return
 		}
-		if enabled, ok := manualNode.Config["enabled"].(bool); !ok || !enabled {
-			response.Error(w, http.StatusConflict, "Enable the Manual Trigger before executing it.")
+		if enabled, ok := triggerNode.Config["enabled"].(bool); !ok || !enabled {
+			response.Error(w, http.StatusConflict, "Enable the workflow trigger before executing it.")
 			return
 		}
 		executedAt := time.Now().UTC().Format(time.RFC3339Nano)
-		item := studioManualTriggerOutput{
-			NodeID: nodeID, NodeType: "manual", ExecutedAt: executedAt,
-			Output: []map[string]map[string]any{{"json": {
-				"trigger": "manual", "mode": "test", "workflowId": workflow.ID,
-				"nodeId": nodeID, "executedAt": executedAt,
-			}}},
+		jsonOutput := map[string]any{
+			"trigger": triggerNode.Type, "mode": "test", "workflowId": workflow.ID,
+			"nodeId": nodeID, "executedAt": executedAt,
+		}
+		if triggerNode.Type == "schedule" {
+			jsonOutput["timezone"] = triggerNode.Config["timezone"]
+			jsonOutput["scheduleMode"] = triggerNode.Config["mode"]
+		}
+		if triggerNode.Type == "webhook" {
+			jsonOutput["method"] = triggerNode.Config["method"]
+			jsonOutput["headers"] = map[string]any{}
+			jsonOutput["query"] = map[string]any{}
+			jsonOutput["body"] = map[string]any{}
+		}
+		item := studioTriggerOutput{
+			NodeID: nodeID, NodeType: triggerNode.Type, ExecutedAt: executedAt,
+			Output: []map[string]map[string]any{{"json": jsonOutput}},
 		}
 		if _, err := s.Studio.CreateAudit(r.Context(), studioAuditInput(r, s, access, "node.execute", "workflow-node", nodeID, "", "completed")); err != nil {
-			log.Printf("studio manual trigger audit persistence failed: %v", err)
+			log.Printf("studio trigger audit persistence failed: %v", err)
 			response.Error(w, http.StatusInternalServerError, "Node executed but its audit record could not be saved.")
 			return
 		}
