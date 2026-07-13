@@ -10,6 +10,8 @@ import (
 	"portfolio-backend/internal/config"
 	"portfolio-backend/internal/model"
 	"portfolio-backend/internal/svc"
+
+	"github.com/zeromicro/go-zero/rest/pathvar"
 )
 
 func TestStudioOverviewHandlerReturnsPublicReadModel(t *testing.T) {
@@ -49,6 +51,32 @@ func TestStudioOverviewHandlerFallsBackWhenTablesUnavailable(t *testing.T) {
 	StudioOverviewHandler(svcCtx).ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/api/studio/overview", nil))
 	if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), "wf-content") {
 		t.Fatalf("expected safe seed fallback, status=%d body=%s", rec.Code, rec.Body.String())
+	}
+}
+
+func TestAdminExecuteStudioManualTriggerReturnsJSONOutput(t *testing.T) {
+	var auditBody map[string]any
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch r.URL.Path {
+		case "/rest/v1/StudioWorkflow":
+			_, _ = w.Write([]byte(`[{"id":"wf-1","name":"Manual Flow","description":"Demo","category":"Ops","status":"draft","runs":0,"success":0,"nodes":["Manual","Transform"],"definition":{"version":1,"nodes":[{"id":"manual","type":"manual","kind":"trigger","label":"Manual","position":{"x":0,"y":0},"config":{"enabled":true}},{"id":"transform","type":"transform","kind":"action","label":"Transform","position":{"x":200,"y":0},"config":{}}],"edges":[{"id":"edge-manual-transform","source":"manual","target":"transform"}]},"createdAt":"2026-01-01T00:00:00Z","updatedAt":"2026-01-01T00:00:00Z"}]`))
+		case "/rest/v1/StudioAuditLog":
+			_ = json.NewDecoder(r.Body).Decode(&auditBody)
+			_, _ = w.Write([]byte(`[{"id":"audit-1","actorType":"bearer","actorLabel":"admin bearer","action":"node.execute","resourceType":"workflow-node","resourceId":"manual","metadata":{},"createdAt":"2026-07-13T12:00:00Z"}]`))
+		default:
+			t.Fatalf("unexpected persistence path %s", r.URL.Path)
+		}
+	}))
+	defer server.Close()
+	s := &svc.ServiceContext{Config: config.Config{AdminApiToken: "test-token"}, HasDatabse: true, Studio: model.NewStudioModel(model.NewSupabaseREST(server.URL, "key"))}
+	req := httptest.NewRequest(http.MethodPost, "/api/admin/studio/workflows/wf-1/nodes/manual/execute", nil)
+	req = pathvar.WithVars(req, map[string]string{"id": "wf-1", "nodeId": "manual"})
+	req.Header.Set("Authorization", "Bearer test-token")
+	rec := httptest.NewRecorder()
+	AdminExecuteStudioManualTriggerHandler(s).ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), `"trigger":"manual"`) || auditBody["action"] != "node.execute" {
+		t.Fatalf("status=%d body=%s audit=%#v", rec.Code, rec.Body.String(), auditBody)
 	}
 }
 
@@ -126,6 +154,21 @@ func TestValidateStudioWorkflowAndTransitions(t *testing.T) {
 	}
 	if !executionTransitions["failed"]["running"] || executionTransitions["completed"]["running"] {
 		t.Fatal("retry transition rules are incorrect")
+	}
+}
+
+func TestValidateWorkflowDefinitionAcceptsMultipleTriggerRoots(t *testing.T) {
+	definition := &model.StudioWorkflowDefinition{Version: 1, Nodes: []model.StudioWorkflowNode{
+		{ID: "schedule", Type: "schedule", Kind: "trigger", Label: "Schedule", Position: model.StudioPosition{X: 0, Y: 0}, Config: map[string]any{"enabled": true, "mode": "daily", "timezone": "Asia/Bangkok", "time": "09:00", "misfirePolicy": "skip"}},
+		{ID: "manual", Type: "manual", Kind: "trigger", Label: "Manual", Position: model.StudioPosition{X: 0, Y: 140}, Config: map[string]any{"enabled": true}},
+		{ID: "transform", Type: "transform", Kind: "action", Label: "Transform", Position: model.StudioPosition{X: 200}, Config: map[string]any{}},
+	}, Edges: []model.StudioWorkflowEdge{
+		{ID: "edge-schedule-transform", Source: "schedule", Target: "transform"},
+		{ID: "edge-manual-transform", Source: "manual", Target: "transform"},
+	}}
+	labels, message := validateWorkflowDefinition(definition, true)
+	if message != "" || len(labels) != 3 || labels[0] != "Schedule" || labels[1] != "Manual" {
+		t.Fatalf("expected valid multi-trigger graph: labels=%v message=%q", labels, message)
 	}
 }
 

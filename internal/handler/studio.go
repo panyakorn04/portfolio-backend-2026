@@ -61,6 +61,13 @@ type studioExecutionPayload struct {
 	WorkflowID string `json:"workflowId"`
 }
 
+type studioManualTriggerOutput struct {
+	NodeID     string                      `json:"nodeId"`
+	NodeType   string                      `json:"nodeType"`
+	ExecutedAt string                      `json:"executedAt"`
+	Output     []map[string]map[string]any `json:"output"`
+}
+
 var workflowStatuses = map[string]bool{"active": true, "draft": true, "paused": true}
 var executionTransitions = map[string]map[string]bool{
 	"running": {"paused": true, "cancelled": true}, "paused": {"running": true, "cancelled": true},
@@ -194,32 +201,53 @@ func validateWorkflowDefinition(definition *model.StudioWorkflowDefinition, requ
 			return nil, message
 		}
 	}
-	if triggerCount != 1 {
-		return nil, "Workflow definition must contain exactly one trigger."
+	if triggerCount == 0 {
+		return nil, "Workflow definition must contain at least one trigger."
 	}
 	sorted := append([]model.StudioWorkflowNode(nil), definition.Nodes...)
-	sort.SliceStable(sorted, func(i, j int) bool { return sorted[i].Position.X < sorted[j].Position.X })
-	if sorted[0].Kind != "trigger" {
-		return nil, "The first workflow node must be a trigger."
+	sort.SliceStable(sorted, func(i, j int) bool {
+		if sorted[i].Position.X == sorted[j].Position.X {
+			return sorted[i].Position.Y < sorted[j].Position.Y
+		}
+		return sorted[i].Position.X < sorted[j].Position.X
+	})
+	triggers := make([]model.StudioWorkflowNode, 0, triggerCount)
+	steps := make([]model.StudioWorkflowNode, 0, len(sorted)-triggerCount)
+	for _, node := range sorted {
+		if node.Kind == "trigger" {
+			triggers = append(triggers, node)
+		} else {
+			steps = append(steps, node)
+		}
 	}
-	if len(definition.Edges) != len(sorted)-1 {
-		return nil, "Workflow definition must contain one linear edge between each consecutive node."
+	if len(steps) > 0 {
+		for _, trigger := range triggers {
+			if trigger.Position.X >= steps[0].Position.X {
+				return nil, "All trigger nodes must be positioned before workflow steps."
+			}
+		}
+	}
+	expectedPairs := map[string]bool{}
+	if len(steps) > 0 {
+		for _, trigger := range triggers {
+			expectedPairs[trigger.ID+"\x00"+steps[0].ID] = true
+		}
+		for index := 0; index < len(steps)-1; index++ {
+			expectedPairs[steps[index].ID+"\x00"+steps[index+1].ID] = true
+		}
+	}
+	if len(definition.Edges) != len(expectedPairs) {
+		return nil, "Workflow edges must connect every trigger to the shared step chain."
 	}
 	edgeIDs := map[string]bool{}
 	edgePairs := map[string]bool{}
 	for _, edge := range definition.Edges {
 		pair := edge.Source + "\x00" + edge.Target
-		if edge.ID == "" || edgeIDs[edge.ID] || edgePairs[pair] || edge.Source == edge.Target || !ids[edge.Source] || !ids[edge.Target] {
-			return nil, "Workflow edges must be unique and reference existing nodes."
+		if edge.ID == "" || edgeIDs[edge.ID] || edgePairs[pair] || edge.Source == edge.Target || !ids[edge.Source] || !ids[edge.Target] || !expectedPairs[pair] {
+			return nil, "Workflow edges must be unique and follow the trigger-to-step graph."
 		}
 		edgeIDs[edge.ID] = true
 		edgePairs[pair] = true
-	}
-	for index := 0; index < len(sorted)-1; index++ {
-		pair := sorted[index].ID + "\x00" + sorted[index+1].ID
-		if !edgePairs[pair] {
-			return nil, "Workflow edges must connect consecutive nodes from left to right."
-		}
 	}
 	labels := make([]string, len(sorted))
 	for i := range sorted {
@@ -478,6 +506,78 @@ func AdminListStudioExecutionsHandler(s *svc.ServiceContext) http.HandlerFunc {
 		response.Ok(w, 200, items)
 	}
 }
+func AdminExecuteStudioManualTriggerHandler(s *svc.ServiceContext) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		access, ok := requireAdmin(w, r, s)
+		if !ok {
+			return
+		}
+		if !assertRole(w, access, []string{"admin", "editor"}) || !requireStudioDB(w, s) {
+			return
+		}
+		if !enforceStudioMutationRateLimit(w, r, s, access) {
+			return
+		}
+		workflowID := strings.TrimSpace(pathParam(r, "id"))
+		nodeID := strings.TrimSpace(pathParam(r, "nodeId"))
+		if workflowID == "" || nodeID == "" || len(workflowID) > 128 || len(nodeID) > 128 {
+			response.Error(w, http.StatusBadRequest, "Workflow and node IDs are required.")
+			return
+		}
+		workflow, err := s.Studio.FindWorkflow(r.Context(), workflowID)
+		if err != nil {
+			response.Error(w, http.StatusInternalServerError, "Unable to load workflow.")
+			return
+		}
+		if workflow == nil {
+			response.Error(w, http.StatusNotFound, "Workflow was not found.")
+			return
+		}
+		if workflow.Status == "paused" {
+			response.Error(w, http.StatusConflict, "Paused workflows cannot test triggers.")
+			return
+		}
+		if workflow.Definition == nil {
+			response.Error(w, http.StatusConflict, "Save a structured workflow definition before executing a node.")
+			return
+		}
+		var manualNode *model.StudioWorkflowNode
+		for index := range workflow.Definition.Nodes {
+			node := &workflow.Definition.Nodes[index]
+			if node.ID == nodeID {
+				manualNode = node
+				break
+			}
+		}
+		if manualNode == nil {
+			response.Error(w, http.StatusNotFound, "Workflow node was not found.")
+			return
+		}
+		if manualNode.Type != "manual" || manualNode.Kind != "trigger" {
+			response.Error(w, http.StatusBadRequest, "Only Manual Trigger nodes support Execute step.")
+			return
+		}
+		if enabled, ok := manualNode.Config["enabled"].(bool); !ok || !enabled {
+			response.Error(w, http.StatusConflict, "Enable the Manual Trigger before executing it.")
+			return
+		}
+		executedAt := time.Now().UTC().Format(time.RFC3339Nano)
+		item := studioManualTriggerOutput{
+			NodeID: nodeID, NodeType: "manual", ExecutedAt: executedAt,
+			Output: []map[string]map[string]any{{"json": {
+				"trigger": "manual", "mode": "test", "workflowId": workflow.ID,
+				"nodeId": nodeID, "executedAt": executedAt,
+			}}},
+		}
+		if _, err := s.Studio.CreateAudit(r.Context(), studioAuditInput(r, s, access, "node.execute", "workflow-node", nodeID, "", "completed")); err != nil {
+			log.Printf("studio manual trigger audit persistence failed: %v", err)
+			response.Error(w, http.StatusInternalServerError, "Node executed but its audit record could not be saved.")
+			return
+		}
+		response.Ok(w, http.StatusOK, item)
+	}
+}
+
 func AdminCreateStudioExecutionHandler(s *svc.ServiceContext) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		access, ok := requireAdmin(w, r, s)
