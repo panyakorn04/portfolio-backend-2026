@@ -8,6 +8,7 @@ import (
 	"math"
 	"net/http"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -189,27 +190,36 @@ func validateWorkflowDefinition(definition *model.StudioWorkflowDefinition, requ
 			triggerCount++
 		}
 
-		if containsCredentialConfig(node.Config) {
-			return nil, "Workflow config must not contain credentials or secrets."
-		}
-		if requireComplete && node.Type == "schedule" {
-			if message := validateScheduleConfig(node.Config); message != "" {
-				return nil, message
-			}
+		if message := validateNodeConfig(node, requireComplete); message != "" {
+			return nil, message
 		}
 	}
 	if triggerCount != 1 {
 		return nil, "Workflow definition must contain exactly one trigger."
 	}
-	for _, edge := range definition.Edges {
-		if edge.ID == "" || edge.Source == edge.Target || !ids[edge.Source] || !ids[edge.Target] {
-			return nil, "Workflow edges must reference existing nodes."
-		}
-	}
 	sorted := append([]model.StudioWorkflowNode(nil), definition.Nodes...)
 	sort.SliceStable(sorted, func(i, j int) bool { return sorted[i].Position.X < sorted[j].Position.X })
 	if sorted[0].Kind != "trigger" {
 		return nil, "The first workflow node must be a trigger."
+	}
+	if len(definition.Edges) != len(sorted)-1 {
+		return nil, "Workflow definition must contain one linear edge between each consecutive node."
+	}
+	edgeIDs := map[string]bool{}
+	edgePairs := map[string]bool{}
+	for _, edge := range definition.Edges {
+		pair := edge.Source + "\x00" + edge.Target
+		if edge.ID == "" || edgeIDs[edge.ID] || edgePairs[pair] || edge.Source == edge.Target || !ids[edge.Source] || !ids[edge.Target] {
+			return nil, "Workflow edges must be unique and reference existing nodes."
+		}
+		edgeIDs[edge.ID] = true
+		edgePairs[pair] = true
+	}
+	for index := 0; index < len(sorted)-1; index++ {
+		pair := sorted[index].ID + "\x00" + sorted[index+1].ID
+		if !edgePairs[pair] {
+			return nil, "Workflow edges must connect consecutive nodes from left to right."
+		}
 	}
 	labels := make([]string, len(sorted))
 	for i := range sorted {
@@ -218,26 +228,44 @@ func validateWorkflowDefinition(definition *model.StudioWorkflowDefinition, requ
 	return labels, ""
 }
 
-func containsCredentialConfig(value any) bool {
-	switch item := value.(type) {
-	case map[string]any:
-		for key, nested := range item {
-			lower := strings.ToLower(key)
-			if strings.Contains(lower, "secret") || strings.Contains(lower, "password") || strings.Contains(lower, "token") || strings.Contains(lower, "apikey") || strings.Contains(lower, "api_key") {
-				return true
-			}
-			if containsCredentialConfig(nested) {
-				return true
-			}
+var studioNodeConfigKeys = map[string]map[string]bool{
+	"schedule": {"enabled": true, "mode": true, "timezone": true, "intervalMinutes": true, "time": true, "daysOfWeek": true, "cronExpression": true, "misfirePolicy": true},
+	"manual":   {"enabled": true},
+	"webhook":  {"enabled": true, "method": true, "authMode": true, "responseMode": true},
+}
+
+func validateNodeConfig(node model.StudioWorkflowNode, requireComplete bool) string {
+	allowed := studioNodeConfigKeys[node.Type]
+	if allowed == nil {
+		if len(node.Config) > 0 {
+			return "This workflow node type does not accept parameters in definition version 1."
 		}
-	case []any:
-		for _, nested := range item {
-			if containsCredentialConfig(nested) {
-				return true
-			}
+		return ""
+	}
+	for key := range node.Config {
+		if !allowed[key] {
+			return "Workflow node config contains an unsupported parameter."
 		}
 	}
-	return false
+	if node.Type == "schedule" && requireComplete {
+		return validateScheduleConfig(node.Config)
+	}
+	if enabled, exists := node.Config["enabled"]; exists {
+		if _, ok := enabled.(bool); !ok {
+			return "Node enabled must be true or false."
+		}
+	} else if requireComplete {
+		return "Node enabled must be true or false."
+	}
+	if node.Type == "webhook" && requireComplete {
+		method, methodOK := node.Config["method"].(string)
+		authMode, authOK := node.Config["authMode"].(string)
+		responseMode, responseOK := node.Config["responseMode"].(string)
+		if !methodOK || (method != "GET" && method != "POST") || !authOK || authMode != "none" || !responseOK || responseMode != "immediate" {
+			return "Webhook configuration is invalid for definition version 1."
+		}
+	}
+	return ""
 }
 
 func configNumber(value any) (float64, bool) {
@@ -284,6 +312,63 @@ func validWeekdays(value any) bool {
 	return len(seen) > 0
 }
 
+func validCronNumber(raw string, minValue, maxValue int) bool {
+	value, err := strconv.Atoi(raw)
+	return err == nil && value >= minValue && value <= maxValue
+}
+
+func validCronField(field string, minValue, maxValue int) bool {
+	if field == "" {
+		return false
+	}
+	for _, item := range strings.Split(field, ",") {
+		parts := strings.Split(item, "/")
+		if len(parts) > 2 {
+			return false
+		}
+		base := parts[0]
+		if len(parts) == 2 {
+			step, err := strconv.Atoi(parts[1])
+			if err != nil || step < 1 || step > maxValue-minValue+1 {
+				return false
+			}
+		}
+		if base == "*" {
+			continue
+		}
+		rangeParts := strings.Split(base, "-")
+		if len(rangeParts) == 1 {
+			if !validCronNumber(rangeParts[0], minValue, maxValue) {
+				return false
+			}
+			continue
+		}
+		if len(rangeParts) != 2 || !validCronNumber(rangeParts[0], minValue, maxValue) || !validCronNumber(rangeParts[1], minValue, maxValue) {
+			return false
+		}
+		start, _ := strconv.Atoi(rangeParts[0])
+		end, _ := strconv.Atoi(rangeParts[1])
+		if start > end {
+			return false
+		}
+	}
+	return true
+}
+
+func validCronExpression(expression string) bool {
+	fields := strings.Fields(expression)
+	if len(fields) != 5 {
+		return false
+	}
+	ranges := [][2]int{{0, 59}, {0, 23}, {1, 31}, {1, 12}, {0, 6}}
+	for index, field := range fields {
+		if !validCronField(field, ranges[index][0], ranges[index][1]) {
+			return false
+		}
+	}
+	return true
+}
+
 func validateScheduleConfig(config map[string]any) string {
 	if _, ok := config["enabled"].(bool); !ok {
 		return "Schedule enabled must be true or false."
@@ -318,8 +403,8 @@ func validateScheduleConfig(config map[string]any) string {
 		}
 	case "cron":
 		expression, _ := config["cronExpression"].(string)
-		if len(strings.Fields(expression)) != 5 {
-			return "Schedule cron expression must contain 5 fields."
+		if !validCronExpression(expression) {
+			return "Schedule cron expression must be a valid 5-field numeric cron expression."
 		}
 	default:
 		return "Schedule mode must be interval, daily, weekly, or cron."

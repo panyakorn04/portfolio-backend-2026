@@ -128,3 +128,34 @@ func TestValidateStudioWorkflowAndTransitions(t *testing.T) {
 		t.Fatal("retry transition rules are incorrect")
 	}
 }
+
+func TestValidateWorkflowDefinitionRejectsDisconnectedGraphsAndUnknownParameters(t *testing.T) {
+	definition := &model.StudioWorkflowDefinition{Version: 1, Nodes: []model.StudioWorkflowNode{
+		{ID: "node-0", Type: "manual", Kind: "trigger", Label: "Manual", Position: model.StudioPosition{X: 0}, Config: map[string]any{"enabled": true}},
+		{ID: "node-1", Type: "transform", Kind: "action", Label: "Transform", Position: model.StudioPosition{X: 200}, Config: map[string]any{}},
+	}}
+	if _, message := validateWorkflowDefinition(definition, true); message == "" {
+		t.Fatal("expected disconnected graph validation")
+	}
+	definition.Edges = []model.StudioWorkflowEdge{{ID: "edge-node-0-node-1", Source: "node-0", Target: "node-1"}}
+	if labels, message := validateWorkflowDefinition(definition, true); message != "" || len(labels) != 2 {
+		t.Fatalf("expected valid linear graph: labels=%v message=%q", labels, message)
+	}
+	definition.Nodes[1].Config["authorization"] = "Bearer must-not-persist"
+	if _, message := validateWorkflowDefinition(definition, true); message == "" {
+		t.Fatal("expected strict action config allowlist validation")
+	}
+}
+
+func TestValidateCronExpression(t *testing.T) {
+	for _, expression := range []string{"0 9 * * *", "*/15 8-17 * * 1-5", "0,30 9 * 1,6 1"} {
+		if !validCronExpression(expression) {
+			t.Fatalf("expected valid cron expression: %q", expression)
+		}
+	}
+	for _, expression := range []string{"foo bar baz qux quux", "60 9 * * *", "0 24 * * *", "0 9 * 13 *", "0 9 * * 7", "*/0 * * * *"} {
+		if validCronExpression(expression) {
+			t.Fatalf("expected invalid cron expression: %q", expression)
+		}
+	}
+}
