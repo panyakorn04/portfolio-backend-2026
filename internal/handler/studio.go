@@ -541,6 +541,10 @@ func AdminExecuteStudioTriggerHandler(s *svc.ServiceContext) http.HandlerFunc {
 			response.Error(w, http.StatusConflict, "Save a structured workflow definition before executing a node.")
 			return
 		}
+		if _, message := validateWorkflowDefinition(workflow.Definition, true); message != "" {
+			response.Error(w, http.StatusConflict, "Save a valid and complete workflow definition before executing a trigger.")
+			return
+		}
 		var triggerNode *model.StudioWorkflowNode
 		for index := range workflow.Definition.Nodes {
 			node := &workflow.Definition.Nodes[index]

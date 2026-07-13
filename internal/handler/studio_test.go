@@ -107,6 +107,23 @@ func TestAdminExecuteStudioScheduleTriggerReturnsJSONOutput(t *testing.T) {
 	}
 }
 
+func TestAdminExecuteStudioTriggerRejectsInvalidPersistedDefinition(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`[{"id":"wf-1","name":"Invalid Draft","description":"Demo","category":"Ops","status":"draft","runs":0,"success":0,"nodes":["Schedule"],"definition":{"version":1,"nodes":[{"id":"schedule","type":"schedule","kind":"trigger","label":"Schedule","position":{"x":0,"y":0},"config":{"enabled":true,"mode":"cron","timezone":"Invalid/Zone","cronExpression":"0 9 * * *","misfirePolicy":"skip"}}],"edges":[]},"createdAt":"2026-01-01T00:00:00Z","updatedAt":"2026-01-01T00:00:00Z"}]`))
+	}))
+	defer server.Close()
+	s := &svc.ServiceContext{Config: config.Config{AdminApiToken: "test-token"}, HasDatabse: true, Studio: model.NewStudioModel(model.NewSupabaseREST(server.URL, "key"))}
+	req := httptest.NewRequest(http.MethodPost, "/api/admin/studio/workflows/wf-1/nodes/schedule/execute", nil)
+	req = pathvar.WithVars(req, map[string]string{"id": "wf-1", "nodeId": "schedule"})
+	req.Header.Set("Authorization", "Bearer test-token")
+	rec := httptest.NewRecorder()
+	AdminExecuteStudioTriggerHandler(s).ServeHTTP(rec, req)
+	if rec.Code != http.StatusConflict || !strings.Contains(rec.Body.String(), "valid and complete") {
+		t.Fatalf("status=%d body=%s", rec.Code, rec.Body.String())
+	}
+}
+
 func TestAdminCreateStudioExecutionPersistsAndAuditsActiveWorkflow(t *testing.T) {
 	var executionBody, auditBody map[string]any
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
