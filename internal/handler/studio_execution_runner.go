@@ -14,16 +14,20 @@ import (
 )
 
 type StudioExecutionRunner struct {
-	service          *svc.ServiceContext
-	workerID         string
-	cancel           context.CancelFunc
-	lastScheduleSlot string
-	wake             chan struct{}
-	wg               sync.WaitGroup
+	service                *svc.ServiceContext
+	workerID               string
+	cancel                 context.CancelFunc
+	lastScheduleSlot       string
+	lastScheduleOccurrence map[string]string
+	wake                   chan struct{}
+	wg                     sync.WaitGroup
 }
 
 func NewStudioExecutionRunner(service *svc.ServiceContext) *StudioExecutionRunner {
-	return &StudioExecutionRunner{service: service, workerID: newStudioWorkerID(), wake: make(chan struct{}, 1)}
+	return &StudioExecutionRunner{
+		service: service, workerID: newStudioWorkerID(), wake: make(chan struct{}, 1),
+		lastScheduleOccurrence: map[string]string{},
+	}
 }
 
 func newStudioWorkerID() string {
@@ -40,8 +44,9 @@ func (runner *StudioExecutionRunner) Start(parent context.Context) {
 	}
 	ctx, cancel := context.WithCancel(parent)
 	runner.cancel = cancel
-	runner.wg.Add(1)
+	runner.wg.Add(2)
 	go runner.loop(ctx)
+	go runner.scheduleLoop(ctx)
 }
 
 func (runner *StudioExecutionRunner) Close() {
@@ -67,9 +72,6 @@ func (runner *StudioExecutionRunner) loop(ctx context.Context) {
 	ticker := time.NewTicker(2 * time.Second)
 	defer ticker.Stop()
 	for {
-		if err := runner.enqueueDueSchedules(ctx, time.Now().UTC()); err != nil && ctx.Err() == nil {
-			log.Printf("studio schedule enqueue error: %v", err)
-		}
 		if err := runner.runAvailable(ctx); err != nil && ctx.Err() == nil {
 			log.Printf("studio execution worker error: %v", err)
 		}
@@ -78,6 +80,22 @@ func (runner *StudioExecutionRunner) loop(ctx context.Context) {
 			return
 		case <-ticker.C:
 		case <-runner.wake:
+		}
+	}
+}
+
+func (runner *StudioExecutionRunner) scheduleLoop(ctx context.Context) {
+	defer runner.wg.Done()
+	ticker := time.NewTicker(2 * time.Second)
+	defer ticker.Stop()
+	for {
+		if err := runner.enqueueDueSchedules(ctx, time.Now().UTC()); err != nil && ctx.Err() == nil {
+			log.Printf("studio schedule enqueue error: %v", err)
+		}
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
 		}
 	}
 }

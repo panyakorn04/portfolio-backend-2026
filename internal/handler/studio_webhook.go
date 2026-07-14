@@ -2,13 +2,16 @@ package handler
 
 import (
 	"crypto/hmac"
+	"crypto/rand"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"io"
 	"net/http"
 	"net/url"
 	"strings"
+	"time"
 
 	"portfolio-backend/internal/model"
 	"portfolio-backend/internal/response"
@@ -17,10 +20,41 @@ import (
 
 const maxStudioWebhookBodyBytes = 1 << 20
 
-func studioWebhookToken(secret, workflowID, nodeID string) string {
+func validStudioWebhookSigningKey(secret, credentialKey string) bool {
+	return len(secret) >= 32 && !hmac.Equal([]byte(secret), []byte(credentialKey))
+}
+
+func studioWebhookToken(secret, workflowID, nodeID, version string) string {
 	mac := hmac.New(sha256.New, []byte(secret))
-	_, _ = mac.Write([]byte("studio-webhook:v1:" + workflowID + ":" + nodeID))
+	_, _ = mac.Write([]byte("studio-webhook:v2:" + workflowID + ":" + nodeID + ":" + version))
 	return hex.EncodeToString(mac.Sum(nil))
+}
+
+func effectiveStudioWebhookTokenVersion(workflow *model.StudioWorkflow, node *model.StudioWorkflowNode) string {
+	if version := studioWebhookTokenVersion(node); version != "" {
+		return version
+	}
+	if workflow == nil || node == nil {
+		return ""
+	}
+	sum := sha256.Sum256([]byte(workflow.UpdatedAt.UTC().Format(time.RFC3339Nano) + ":" + node.ID))
+	return hex.EncodeToString(sum[:16])
+}
+
+func newStudioWebhookTokenVersion() string {
+	var value [16]byte
+	if _, err := rand.Read(value[:]); err != nil {
+		return ""
+	}
+	return hex.EncodeToString(value[:])
+}
+
+func studioWebhookTokenVersion(node *model.StudioWorkflowNode) string {
+	if node == nil {
+		return ""
+	}
+	version, _ := node.Config["webhookTokenVersion"].(string)
+	return strings.TrimSpace(version)
 }
 
 func AdminStudioWebhookURLHandler(service *svc.ServiceContext) http.HandlerFunc {
@@ -41,30 +75,66 @@ func AdminStudioWebhookURLHandler(service *svc.ServiceContext) http.HandlerFunc 
 			response.Error(w, http.StatusNotFound, "Webhook node was not found.")
 			return
 		}
-		secret := service.Config.StudioCredentialEncryptionKey
-		if secret == "" {
+		secret := service.Config.StudioWebhookSigningKey
+		version := effectiveStudioWebhookTokenVersion(workflow, node)
+		if !validStudioWebhookSigningKey(secret, service.Config.StudioCredentialEncryptionKey) || version == "" {
 			response.Error(w, http.StatusServiceUnavailable, "Webhook signing is not configured.")
 			return
 		}
-		token := studioWebhookToken(secret, workflowID, nodeID)
+		token := studioWebhookToken(secret, workflowID, nodeID, version)
 		path := "/api/studio/webhooks/" + url.PathEscape(workflowID) + "/" + url.PathEscape(nodeID)
-		response.Ok(w, http.StatusOK, map[string]string{"path": path, "header": "X-Studio-Webhook-Token", "token": token})
+		response.Ok(w, http.StatusOK, map[string]string{
+			"path": path, "header": "X-Studio-Webhook-Token", "token": token,
+			"versionHeader": "X-Studio-Webhook-Version", "version": version,
+		})
 	}
+}
+
+func parseStudioWebhookBody(contentType string, body []byte) (any, error) {
+	if len(body) == 0 {
+		return map[string]any{}, nil
+	}
+	contentType = strings.ToLower(contentType)
+	if strings.Contains(contentType, "application/json") {
+		var parsed any
+		if json.Unmarshal(body, &parsed) != nil {
+			return nil, errors.New("Webhook JSON body is invalid.")
+		}
+		return parsed, nil
+	}
+	if strings.Contains(contentType, "application/x-www-form-urlencoded") {
+		values, err := url.ParseQuery(string(body))
+		if err != nil {
+			return nil, errors.New("Webhook form body is invalid.")
+		}
+		form := map[string]any{}
+		for key, entries := range values {
+			if isStudioSecretFieldName(key) {
+				form[key] = "[REDACTED]"
+			} else {
+				form[key] = append([]string(nil), entries...)
+			}
+		}
+		return form, nil
+	}
+	return redactStudioPersistedString(string(body)), nil
 }
 
 func StudioWebhookHandler(service *svc.ServiceContext) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		if service == nil || service.Studio == nil || service.Config.StudioCredentialEncryptionKey == "" {
+		if service == nil || service.Studio == nil || !validStudioWebhookSigningKey(service.Config.StudioWebhookSigningKey, service.Config.StudioCredentialEncryptionKey) {
 			response.Error(w, http.StatusServiceUnavailable, "Webhook execution is not configured.")
 			return
 		}
 		workflowID := strings.TrimSpace(pathParam(r, "id"))
 		nodeID := strings.TrimSpace(pathParam(r, "nodeId"))
 		providedToken := strings.TrimSpace(r.Header.Get("X-Studio-Webhook-Token"))
-		expectedToken := studioWebhookToken(service.Config.StudioCredentialEncryptionKey, workflowID, nodeID)
+		providedVersion := strings.TrimSpace(r.Header.Get("X-Studio-Webhook-Version"))
+		versionBytes, versionErr := hex.DecodeString(providedVersion)
+		expectedToken := studioWebhookToken(service.Config.StudioWebhookSigningKey, workflowID, nodeID, providedVersion)
 		providedBytes, decodeErr := hex.DecodeString(providedToken)
 		expectedBytes, _ := hex.DecodeString(expectedToken)
-		if decodeErr != nil || !hmac.Equal(providedBytes, expectedBytes) {
+		if versionErr != nil || len(versionBytes) != 16 || decodeErr != nil || !hmac.Equal(providedBytes, expectedBytes) {
 			response.Error(w, http.StatusNotFound, "Webhook was not found.")
 			return
 		}
@@ -75,6 +145,11 @@ func StudioWebhookHandler(service *svc.ServiceContext) http.HandlerFunc {
 		}
 		node := findStudioWorkflowNode(workflow, nodeID)
 		if workflow == nil || workflow.Status != "active" || node == nil || node.Type != "webhook" || node.Kind != "trigger" {
+			response.Error(w, http.StatusNotFound, "Webhook was not found.")
+			return
+		}
+		version := effectiveStudioWebhookTokenVersion(workflow, node)
+		if version == "" || !hmac.Equal([]byte(providedVersion), []byte(version)) {
 			response.Error(w, http.StatusNotFound, "Webhook was not found.")
 			return
 		}
@@ -89,14 +164,10 @@ func StudioWebhookHandler(service *svc.ServiceContext) http.HandlerFunc {
 			response.Error(w, http.StatusRequestEntityTooLarge, "Webhook body is too large.")
 			return
 		}
-		var parsedBody any = string(body)
-		if len(body) == 0 {
-			parsedBody = map[string]any{}
-		} else if strings.Contains(strings.ToLower(r.Header.Get("Content-Type")), "application/json") {
-			if json.Unmarshal(body, &parsedBody) != nil {
-				response.Error(w, http.StatusBadRequest, "Webhook JSON body is invalid.")
-				return
-			}
+		parsedBody, parseErr := parseStudioWebhookBody(r.Header.Get("Content-Type"), body)
+		if parseErr != nil {
+			response.Error(w, http.StatusBadRequest, parseErr.Error())
+			return
 		}
 		query := map[string]any{}
 		for key, values := range r.URL.Query() {
@@ -126,6 +197,38 @@ func StudioWebhookHandler(service *svc.ServiceContext) http.HandlerFunc {
 		}
 		response.Ok(w, http.StatusAccepted, map[string]string{"executionId": item.ID, "status": item.Status})
 	}
+}
+
+func ensureStudioWebhookTokenVersions(definition *model.StudioWorkflowDefinition) bool {
+	if definition == nil {
+		return true
+	}
+	for index := range definition.Nodes {
+		node := &definition.Nodes[index]
+		if node.Type != "webhook" {
+			continue
+		}
+		if node.Config == nil {
+			node.Config = map[string]any{}
+		}
+		if authMode, _ := node.Config["authMode"].(string); authMode == "" || authMode == "none" {
+			node.Config["authMode"] = "capability"
+		}
+		version := studioWebhookTokenVersion(node)
+		decoded, err := hex.DecodeString(version)
+		if err == nil && len(decoded) == 16 {
+			continue
+		}
+		version = newStudioWebhookTokenVersion()
+		if version == "" {
+			return false
+		}
+		if node.Config == nil {
+			node.Config = map[string]any{}
+		}
+		node.Config["webhookTokenVersion"] = version
+	}
+	return true
 }
 
 func findStudioWorkflowNode(workflow *model.StudioWorkflow, nodeID string) *model.StudioWorkflowNode {

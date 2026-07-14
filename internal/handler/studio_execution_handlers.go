@@ -80,7 +80,7 @@ func enqueueStudioWorkflowExecution(ctxRequest *http.Request, service *svc.Servi
 	}
 	sourceKey := payload.SourceKey
 	if sourceKey != "" {
-		sourceKey = workflow.ID + ":" + source + ":" + sourceKey
+		sourceKey = workflow.ID + ":" + source + ":" + payload.TriggerNodeID + ":" + sourceKey
 	}
 	item, err := service.Studio.EnqueueGraphExecution(ctxRequest.Context(), model.StudioGraphExecutionInput{
 		WorkflowID: workflow.ID, WorkflowName: workflow.Name, WorkflowUpdatedAt: workflow.UpdatedAt,

@@ -50,7 +50,7 @@ cp .env.example .env
 
 go mod tidy
 
-# Apply migrations in numeric order through 0011_studio_execution_security.sql.
+# Apply migrations in numeric order through 0012_studio_schedule_webhook_security.sql.
 
 # Create/update an admin user through Supabase REST
 set -a; source .env; set +a
@@ -87,11 +87,13 @@ credential storage and the matching audit allowlist. `migrations/0010_studio_gra
 adds the database-backed execution queue, worker leases, cancellation/idempotency
 RPCs, persisted node input/output, and workflow-history cascade cleanup.
 `migrations/0011_studio_execution_security.sql` revokes direct browser roles from
-private Studio tables/RPCs and hardens cancellation, lease, and crash recovery. Configure
-a backend-only `STUDIO_CREDENTIAL_ENCRYPTION_KEY` as a base64-encoded random 32-byte key;
-credential operations fail closed when it is absent or malformed. The same key is
-used as HMAC key material for scoped Studio webhook capabilities and is never
-included in workflow definitions.
+private Studio tables/RPCs and hardens cancellation, lease, and crash recovery.
+`migrations/0012_studio_schedule_webhook_security.sql` fixes replay idempotency for
+schedule and webhook execution sources. Configure a backend-only
+`STUDIO_CREDENTIAL_ENCRYPTION_KEY` as a base64-encoded random 32-byte key;
+credential operations fail closed when it is absent or malformed. Configure a
+separate random `STUDIO_WEBHOOK_SIGNING_KEY` for per-node, versioned webhook
+capabilities; it must not equal the credential-encryption key.
 The public `GET /api/studio/overview` reads these tables and deliberately returns
 the safe portfolio seed if Supabase is not configured, unreachable, or the new
 tables have not been migrated yet. It never returns database errors or secrets.

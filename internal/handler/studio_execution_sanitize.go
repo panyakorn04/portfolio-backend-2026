@@ -12,7 +12,7 @@ var studioPersistedSecretPatterns = []*regexp.Regexp{
 	regexp.MustCompile(`(?i)\b(?:bearer|basic)\s+[A-Za-z0-9._~+/=-]{8,}`),
 	regexp.MustCompile(`\b(?:sk-|ghp_|github_pat_)[A-Za-z0-9_.-]{8,}\b`),
 	regexp.MustCompile(`\beyJ[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\b`),
-	regexp.MustCompile(`(?i)(authorization|api[_ -]?key|api[_ -]?token|access[_ -]?token|refresh[_ -]?token|client[_ -]?secret|password|passwd|cookie|signature)\s*[:=]\s*[^\s,;]+`),
+	regexp.MustCompile(`(?i)(authorization|api[_ -]?key|api[_ -]?token|access[_ -]?token|refresh[_ -]?token|client[_ -]?secret|token|secret|password|passwd|cookie|signature)\s*[:=]\s*[^\s,;]+`),
 }
 
 func redactStudioPersistedString(value string) string {

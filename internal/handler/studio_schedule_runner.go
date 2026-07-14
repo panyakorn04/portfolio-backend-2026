@@ -2,6 +2,7 @@ package handler
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strconv"
 	"strings"
@@ -19,7 +20,7 @@ func (runner *StudioExecutionRunner) enqueueDueSchedules(ctx context.Context, no
 	if err != nil {
 		return err
 	}
-	runner.lastScheduleSlot = slot
+	var enqueueErrors []error
 	for index := range workflows {
 		workflow := &workflows[index]
 		if workflow.Status != "active" || workflow.Definition == nil {
@@ -37,6 +38,11 @@ func (runner *StudioExecutionRunner) enqueueDueSchedules(ctx context.Context, no
 			if misfire != "run-once" && !scheduledAt.Truncate(time.Minute).Equal(now.Truncate(time.Minute)) {
 				continue
 			}
+			occurrenceSlot := scheduledAt.UTC().Format("200601021504")
+			occurrenceKey := workflow.ID + ":" + node.ID
+			if runner.lastScheduleOccurrence[occurrenceKey] == occurrenceSlot {
+				continue
+			}
 			compiled, compileErr := compileStudioGraph(workflow.Definition, node.ID, studioGraphModeFull, "")
 			if compileErr != nil {
 				continue
@@ -45,23 +51,23 @@ func (runner *StudioExecutionRunner) enqueueDueSchedules(ctx context.Context, no
 			for _, pathNode := range compiled.Nodes {
 				path = append(path, model.StudioExecutionPathNode{ID: pathNode.ID, Type: pathNode.Type, Label: pathNode.Label})
 			}
-			localSlot := scheduledAt.UTC().Format("200601021504")
-			if locationName, ok := node.Config["timezone"].(string); ok {
-				if location, locationErr := time.LoadLocation(locationName); locationErr == nil {
-					localSlot = scheduledAt.In(location).Format("200601021504")
-				}
-			}
 			_, enqueueErr := runner.service.Studio.EnqueueGraphExecution(ctx, model.StudioGraphExecutionInput{
 				WorkflowID: workflow.ID, WorkflowName: workflow.Name, WorkflowUpdatedAt: workflow.UpdatedAt,
 				TriggerNodeID: node.ID, Mode: "full", Source: "schedule",
-				SourceKey:    workflow.ID + ":schedule:" + node.ID + ":" + localSlot,
+				SourceKey:    workflow.ID + ":schedule:" + node.ID + ":" + occurrenceSlot,
 				InitialInput: []map[string]any{}, Path: path,
 			})
 			if enqueueErr != nil {
-				return fmt.Errorf("enqueue workflow %s schedule %s: %w", workflow.ID, node.ID, enqueueErr)
+				enqueueErrors = append(enqueueErrors, fmt.Errorf("enqueue workflow %s schedule %s: %w", workflow.ID, node.ID, enqueueErr))
+				continue
 			}
+			runner.lastScheduleOccurrence[occurrenceKey] = occurrenceSlot
 		}
 	}
+	if len(enqueueErrors) > 0 {
+		return errors.Join(enqueueErrors...)
+	}
+	runner.lastScheduleSlot = slot
 	return nil
 }
 

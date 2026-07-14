@@ -36,6 +36,7 @@ ContactWebhookSecret: ${CONTACT_WEBHOOK_SECRET}
 AdminApiToken: ${ADMIN_API_TOKEN}
 InternalApiToken: ${INTERNAL_API_TOKEN}
 StudioCredentialEncryptionKey: ${STUDIO_CREDENTIAL_ENCRYPTION_KEY}
+StudioWebhookSigningKey: ${STUDIO_WEBHOOK_SIGNING_KEY}
 
 # AI provider config (optional).
 AiProvider: ${AI_PROVIDER}

@@ -2,6 +2,7 @@ package handler
 
 import (
 	"context"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -261,7 +262,7 @@ func validateWorkflowDefinition(definition *model.StudioWorkflowDefinition, requ
 var studioNodeConfigKeys = map[string]map[string]bool{
 	"schedule":     {"enabled": true, "mode": true, "timezone": true, "intervalMinutes": true, "time": true, "daysOfWeek": true, "cronExpression": true, "misfirePolicy": true},
 	"manual":       {"enabled": true},
-	"webhook":      {"enabled": true, "method": true, "authMode": true, "responseMode": true},
+	"webhook":      {"enabled": true, "method": true, "authMode": true, "responseMode": true, "webhookTokenVersion": true},
 	"http-request": {"method": true, "url": true, "headers": true, "body": true, "queryParameters": true, "authMode": true, "credentialId": true, "options": true},
 }
 
@@ -294,7 +295,9 @@ func validateNodeConfig(node model.StudioWorkflowNode, requireComplete bool) str
 		method, methodOK := node.Config["method"].(string)
 		authMode, authOK := node.Config["authMode"].(string)
 		responseMode, responseOK := node.Config["responseMode"].(string)
-		if !methodOK || (method != "GET" && method != "POST") || !authOK || authMode != "none" || !responseOK || responseMode != "immediate" {
+		version, versionOK := node.Config["webhookTokenVersion"].(string)
+		decodedVersion, versionErr := hex.DecodeString(version)
+		if !methodOK || (method != "GET" && method != "POST") || !authOK || authMode != "capability" || !responseOK || responseMode != "immediate" || !versionOK || versionErr != nil || len(decodedVersion) != 16 {
 			return "Webhook configuration is invalid for definition version 1."
 		}
 	}
@@ -884,6 +887,10 @@ func studioWorkflowMutation(s *svc.ServiceContext, create bool) http.HandlerFunc
 		}
 		var p studioWorkflowPayload
 		if !decodeJSON(w, r, &p) {
+			return
+		}
+		if !ensureStudioWebhookTokenVersions(p.Definition) {
+			response.Error(w, http.StatusInternalServerError, "Unable to initialize webhook capability version.")
 			return
 		}
 		in, msg := validateStudioWorkflow(p)
