@@ -1,9 +1,11 @@
 package handler
 
 import (
+	"bytes"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"log"
 	"math"
 	"net/http"
@@ -165,7 +167,7 @@ func validateStudioWorkflow(p studioWorkflowPayload) (model.StudioWorkflowInput,
 
 var studioNodeKinds = map[string]string{
 	"schedule": "trigger", "webhook": "trigger", "manual": "trigger",
-	"search": "action", "analyze": "action", "generate": "action", "extract": "action", "transform": "action",
+	"search": "action", "analyze": "action", "generate": "action", "extract": "action", "transform": "action", "http-request": "action",
 	"review": "logic", "approve": "logic", "condition": "logic", "route": "logic",
 	"publish": "output", "notify": "output", "sync": "output", "export": "output",
 }
@@ -257,9 +259,10 @@ func validateWorkflowDefinition(definition *model.StudioWorkflowDefinition, requ
 }
 
 var studioNodeConfigKeys = map[string]map[string]bool{
-	"schedule": {"enabled": true, "mode": true, "timezone": true, "intervalMinutes": true, "time": true, "daysOfWeek": true, "cronExpression": true, "misfirePolicy": true},
-	"manual":   {"enabled": true},
-	"webhook":  {"enabled": true, "method": true, "authMode": true, "responseMode": true},
+	"schedule":    {"enabled": true, "mode": true, "timezone": true, "intervalMinutes": true, "time": true, "daysOfWeek": true, "cronExpression": true, "misfirePolicy": true},
+	"manual":      {"enabled": true},
+	"webhook":     {"enabled": true, "method": true, "authMode": true, "responseMode": true},
+	"http-request": {"method": true, "url": true, "headers": true, "body": true},
 }
 
 func validateNodeConfig(node model.StudioWorkflowNode, requireComplete bool) string {
@@ -278,12 +281,14 @@ func validateNodeConfig(node model.StudioWorkflowNode, requireComplete bool) str
 	if node.Type == "schedule" && requireComplete {
 		return validateScheduleConfig(node.Config)
 	}
-	if enabled, exists := node.Config["enabled"]; exists {
-		if _, ok := enabled.(bool); !ok {
+	if node.Type != "http-request" {
+		if enabled, exists := node.Config["enabled"]; exists {
+			if _, ok := enabled.(bool); !ok {
+				return "Node enabled must be true or false."
+			}
+		} else if requireComplete {
 			return "Node enabled must be true or false."
 		}
-	} else if requireComplete {
-		return "Node enabled must be true or false."
 	}
 	if node.Type == "webhook" && requireComplete {
 		method, methodOK := node.Config["method"].(string)
@@ -291,6 +296,17 @@ func validateNodeConfig(node model.StudioWorkflowNode, requireComplete bool) str
 		responseMode, responseOK := node.Config["responseMode"].(string)
 		if !methodOK || (method != "GET" && method != "POST") || !authOK || authMode != "none" || !responseOK || responseMode != "immediate" {
 			return "Webhook configuration is invalid for definition version 1."
+		}
+	}
+	if node.Type == "http-request" && requireComplete {
+		method, methodOK := node.Config["method"].(string)
+		url, urlOK := node.Config["url"].(string)
+		if !methodOK || !urlOK || url == "" {
+			return "HTTP Request requires a method and a non-empty URL."
+		}
+		validMethods := map[string]bool{"GET": true, "POST": true, "PUT": true, "PATCH": true, "DELETE": true}
+		if !validMethods[method] {
+			return "HTTP Request method must be GET, POST, PUT, PATCH, or DELETE."
 		}
 	}
 	return ""
@@ -588,6 +604,139 @@ func AdminExecuteStudioTriggerHandler(s *svc.ServiceContext) http.HandlerFunc {
 			log.Printf("studio trigger audit persistence failed: %v", err)
 			response.Error(w, http.StatusInternalServerError, "Node executed but its audit record could not be saved.")
 			return
+		}
+		response.Ok(w, http.StatusOK, item)
+	}
+}
+
+func AdminExecuteStudioHttpRequestHandler(s *svc.ServiceContext) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		access, ok := requireAdmin(w, r, s)
+		if !ok {
+			return
+		}
+		if !assertRole(w, access, []string{"admin", "editor"}) || !requireStudioDB(w, s) {
+			return
+		}
+		if !enforceStudioMutationRateLimit(w, r, s, access) {
+			return
+		}
+		workflowID := strings.TrimSpace(pathParam(r, "id"))
+		nodeID := strings.TrimSpace(pathParam(r, "nodeId"))
+		if workflowID == "" || nodeID == "" || len(workflowID) > 128 || len(nodeID) > 128 {
+			response.Error(w, http.StatusBadRequest, "Workflow and node IDs are required.")
+			return
+		}
+		workflow, err := s.Studio.FindWorkflow(r.Context(), workflowID)
+		if err != nil {
+			response.Error(w, http.StatusInternalServerError, "Unable to load workflow.")
+			return
+		}
+		if workflow == nil {
+			response.Error(w, http.StatusNotFound, "Workflow was not found.")
+			return
+		}
+		if workflow.Status == "paused" {
+			response.Error(w, http.StatusConflict, "Paused workflows cannot test nodes.")
+			return
+		}
+		if workflow.Definition == nil {
+			response.Error(w, http.StatusConflict, "Save a structured workflow definition before executing a node.")
+			return
+		}
+		var actionNode *model.StudioWorkflowNode
+		for index := range workflow.Definition.Nodes {
+			node := &workflow.Definition.Nodes[index]
+			if node.ID == nodeID {
+				actionNode = node
+				break
+			}
+		}
+		if actionNode == nil {
+			response.Error(w, http.StatusNotFound, "Workflow node was not found.")
+			return
+		}
+		if actionNode.Type != "http-request" {
+			response.Error(w, http.StatusBadRequest, "Only http-request nodes support this endpoint.")
+			return
+		}
+
+		config := actionNode.Config
+		method, _ := config["method"].(string)
+		url, _ := config["url"].(string)
+		if method == "" || url == "" {
+			response.Error(w, http.StatusBadRequest, "HTTP request method and URL are required.")
+			return
+		}
+
+		var requestBody io.Reader
+		if method != "GET" && method != "DELETE" {
+			if body, ok := config["body"].(string); ok && body != "" {
+				requestBody = bytes.NewBufferString(body)
+			}
+		}
+
+		req, err := http.NewRequestWithContext(r.Context(), method, url, requestBody)
+		if err != nil {
+			response.Error(w, http.StatusBadRequest, "Invalid HTTP request: "+err.Error())
+			return
+		}
+
+		var headers map[string]string
+		switch h := config["headers"].(type) {
+		case map[string]any:
+			headers = make(map[string]string, len(h))
+			for k, v := range h {
+				headers[k] = fmt.Sprint(v)
+			}
+		case map[string]string:
+			headers = h
+		case string:
+			if h != "" {
+				if err := json.Unmarshal([]byte(h), &headers); err != nil {
+					response.Error(w, http.StatusBadRequest, "Invalid headers JSON: "+err.Error())
+					return
+				}
+			}
+		}
+		for k, v := range headers {
+			req.Header.Set(k, v)
+		}
+
+		client := &http.Client{Timeout: 30 * time.Second}
+		resp, err := client.Do(req)
+		if err != nil {
+			response.Error(w, http.StatusBadGateway, "HTTP request failed: "+err.Error())
+			return
+		}
+		defer resp.Body.Close()
+
+		respBody, _ := io.ReadAll(resp.Body)
+		executedAt := time.Now().UTC().Format(time.RFC3339Nano)
+
+		var parsedBody any
+		if contentType := resp.Header.Get("Content-Type"); len(contentType) > 0 {
+			if err := json.Unmarshal(respBody, &parsedBody); err != nil {
+				parsedBody = string(respBody)
+			}
+		} else {
+			parsedBody = string(respBody)
+		}
+
+		item := studioTriggerOutput{
+			NodeID: nodeID, NodeType: "http-request", ExecutedAt: executedAt,
+			Output: []map[string]map[string]any{{
+				"json": {
+					"statusCode": resp.StatusCode,
+					"status":     resp.Status,
+					"headers":    resp.Header,
+					"body":       parsedBody,
+				},
+			}},
+		}
+
+		if _, err := s.Studio.CreateAudit(r.Context(), studioAuditInput(r, s, access, "node.execute", "workflow-node", nodeID, "", "completed")); err != nil {
+			log.Printf("studio http-request audit persistence failed: %v", err)
 		}
 		response.Ok(w, http.StatusOK, item)
 	}
