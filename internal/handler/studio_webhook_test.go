@@ -51,8 +51,8 @@ func TestEnsureStudioWebhookTokenVersionsAndBodyRedaction(t *testing.T) {
 	if err != nil || strings.Contains(formText, "hidden") || strings.Contains(formText, "token=secret") {
 		t.Fatalf("form webhook secrets leaked: %#v, %v", form, err)
 	}
-	raw, err := parseStudioWebhookBody("text/plain", []byte("password=hidden token=secret"))
-	if err != nil || strings.Contains(raw.(string), "hidden") || strings.Contains(raw.(string), "token=secret") {
+	raw, err := parseStudioWebhookBody("text/plain", []byte(`{"password":"hidden","token":"secret"}`))
+	if err != nil || strings.Contains(raw.(string), "hidden") || strings.Contains(raw.(string), "secret") {
 		t.Fatalf("raw webhook secrets leaked: %#v, %v", raw, err)
 	}
 }
