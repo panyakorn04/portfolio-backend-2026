@@ -120,6 +120,11 @@ func (runner *StudioExecutionRunner) execute(ctx context.Context, execution *mod
 		fail("invalid_graph", "The workflow graph is no longer executable.")
 		return
 	}
+	triggerEnabled, _ := compiled.Nodes[0].Config["enabled"].(bool)
+	if !triggerEnabled {
+		fail("trigger_disabled", "The selected workflow trigger is disabled.")
+		return
+	}
 	stages, err := runner.service.Studio.ListExecutionStages(ctx, execution.ID)
 	if err != nil || len(stages) != len(compiled.Nodes) {
 		fail("stage_mismatch", "The persisted execution stages do not match the workflow graph.")
@@ -136,6 +141,11 @@ func (runner *StudioExecutionRunner) execute(ctx context.Context, execution *mod
 		if stage.Status == "completed" {
 			items = stage.Output
 			continue
+		}
+		if execution.ErrorCode == "lease_recovered" && stage.Status == "running" {
+			_, _ = runner.service.Studio.FinishExecutionStage(ctx, execution.ID, position, runner.workerID, "failed", nil, "dispatch_state_unknown", "The prior worker may have completed this external request.", "Stopped after worker recovery to prevent duplicate side effects")
+			fail("dispatch_state_unknown", "Execution stopped after worker recovery because the prior external request state is unknown.")
+			return
 		}
 		current, findErr := runner.service.Studio.FindExecution(ctx, execution.ID)
 		if findErr != nil || current == nil {

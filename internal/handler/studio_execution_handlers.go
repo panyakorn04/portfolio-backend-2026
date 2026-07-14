@@ -66,6 +66,10 @@ func enqueueStudioWorkflowExecution(ctxRequest *http.Request, service *svc.Servi
 	if err != nil {
 		return nil, "The selected workflow path is not executable: " + err.Error()
 	}
+	triggerEnabled, _ := compiled.Nodes[0].Config["enabled"].(bool)
+	if !triggerEnabled {
+		return nil, "The selected workflow trigger is disabled."
+	}
 	path := make([]model.StudioExecutionPathNode, 0, len(compiled.Nodes))
 	for _, node := range compiled.Nodes {
 		path = append(path, model.StudioExecutionPathNode{ID: node.ID, Type: node.Type, Label: node.Label})
@@ -170,7 +174,8 @@ func AdminExecuteStudioPreviousNodesHandler(service *svc.ServiceContext) http.Ha
 
 func AdminGetStudioExecutionHandler(service *svc.ServiceContext) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		if _, ok := requireAdmin(w, r, service); !ok || !requireStudioDB(w, service) {
+		access, ok := requireAdmin(w, r, service)
+		if !ok || !assertRole(w, access, []string{"admin", "editor"}) || !requireStudioDB(w, service) {
 			return
 		}
 		id := strings.TrimSpace(pathParam(r, "id"))

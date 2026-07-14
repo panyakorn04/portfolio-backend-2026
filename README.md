@@ -50,7 +50,7 @@ cp .env.example .env
 
 go mod tidy
 
-# Apply migrations in numeric order through 0010_studio_graph_execution.sql.
+# Apply migrations in numeric order through 0011_studio_execution_security.sql.
 
 # Create/update an admin user through Supabase REST
 set -a; source .env; set +a
@@ -85,7 +85,9 @@ stages and idempotently seeds existing runs from their workflow nodes.
 graph definition. `migrations/0009_studio_credentials.sql` adds encrypted HTTP
 credential storage and the matching audit allowlist. `migrations/0010_studio_graph_execution.sql`
 adds the database-backed execution queue, worker leases, cancellation/idempotency
-RPCs, persisted node input/output, and workflow-history cascade cleanup. Configure
+RPCs, persisted node input/output, and workflow-history cascade cleanup.
+`migrations/0011_studio_execution_security.sql` revokes direct browser roles from
+private Studio tables/RPCs and hardens cancellation, lease, and crash recovery. Configure
 a backend-only `STUDIO_CREDENTIAL_ENCRYPTION_KEY` as a base64-encoded random 32-byte key;
 credential operations fail closed when it is absent or malformed. The same key is
 used as HMAC key material for scoped Studio webhook capabilities and is never
