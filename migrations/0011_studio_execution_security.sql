@@ -72,7 +72,7 @@ BEGIN
     UPDATE "StudioExecution" execution
        SET "leaseUntil" = "occurredAt" + make_interval(secs => "leaseSeconds"), "updatedAt" = "occurredAt"
      WHERE execution."id" = "executionId" AND execution."leaseOwner" = "workerId"
-       AND execution."status" = 'running' AND execution."leaseUntil" >= "occurredAt";
+       AND execution."status" = 'running' AND execution."leaseUntil" >= LOCALTIMESTAMP;
     IF NOT FOUND THEN
         RETURN FALSE;
     END IF;
@@ -115,9 +115,45 @@ BEGIN
            SELECT 1 FROM "StudioExecution" execution
             WHERE execution."id" = "executionId" AND execution."leaseOwner" = "workerId"
               AND execution."status" IN ('running', 'cancellation_requested')
-              AND execution."leaseUntil" >= "occurredAt"
+              AND execution."leaseUntil" >= LOCALTIMESTAMP
        );
     GET DIAGNOSTICS changed = ROW_COUNT;
+    RETURN changed = 1;
+END;
+$$;
+
+CREATE OR REPLACE FUNCTION "finishStudioGraphExecution"(
+    "executionId" TEXT,
+    "workerId" TEXT,
+    "executionStatus" TEXT,
+    "executionErrorCode" TEXT,
+    "executionErrorMessage" TEXT,
+    "occurredAt" TIMESTAMP
+) RETURNS BOOLEAN
+LANGUAGE plpgsql SECURITY INVOKER SET search_path = public AS $$
+DECLARE changed INTEGER;
+BEGIN
+    IF "executionStatus" NOT IN ('completed', 'failed', 'cancelled') THEN
+        RAISE EXCEPTION 'executionStatus is invalid';
+    END IF;
+    UPDATE "StudioExecution" execution
+       SET "status" = CASE WHEN execution."status" = 'cancellation_requested' THEN 'cancelled' ELSE "executionStatus" END,
+           "errorCode" = CASE WHEN execution."status" = 'cancellation_requested' THEN 'cancelled' ELSE "executionErrorCode" END,
+           "errorMessage" = CASE WHEN execution."status" = 'cancellation_requested' THEN 'Execution cancelled.' ELSE "executionErrorMessage" END,
+           "completedAt" = "occurredAt",
+           "durationMs" = GREATEST(0, FLOOR(EXTRACT(EPOCH FROM ("occurredAt" - execution."startedAt")) * 1000)::INTEGER),
+           "leaseOwner" = NULL, "leaseUntil" = NULL, "updatedAt" = "occurredAt"
+     WHERE execution."id" = "executionId" AND execution."leaseOwner" = "workerId"
+       AND execution."status" IN ('running', 'cancellation_requested')
+       AND execution."leaseUntil" >= LOCALTIMESTAMP;
+    GET DIAGNOSTICS changed = ROW_COUNT;
+    IF changed = 1 THEN
+        UPDATE "StudioExecutionStage" stage
+           SET "status" = CASE WHEN (SELECT execution."status" FROM "StudioExecution" execution WHERE execution."id" = "executionId") = 'cancelled' THEN 'cancelled' ELSE 'skipped' END,
+               "detail" = CASE WHEN (SELECT execution."status" FROM "StudioExecution" execution WHERE execution."id" = "executionId") = 'cancelled' THEN 'Execution cancelled' ELSE 'Skipped after execution stopped' END,
+               "completedAt" = "occurredAt", "updatedAt" = "occurredAt"
+         WHERE stage."executionId" = "executionId" AND stage."status" = 'pending';
+    END IF;
     RETURN changed = 1;
 END;
 $$;
