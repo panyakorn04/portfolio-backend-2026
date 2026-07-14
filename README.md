@@ -50,7 +50,7 @@ cp .env.example .env
 
 go mod tidy
 
-# Apply migrations in numeric order through 0007_studio_execution_stages.sql.
+# Apply migrations in numeric order through 0009_studio_credentials.sql.
 
 # Create/update an admin user through Supabase REST
 set -a; source .env; set +a
@@ -81,6 +81,11 @@ Optional Redis article cache and distributed rate-limit env:
 `execution.create` audit action without modifying an applied migration.
 `migrations/0007_studio_execution_stages.sql` adds ordered, execution-specific
 stages and idempotently seeds existing runs from their workflow nodes.
+`migrations/0008_studio_workflow_definition.sql` adds the private typed workflow
+graph definition. `migrations/0009_studio_credentials.sql` adds encrypted HTTP
+credential storage and the matching audit allowlist. Configure a backend-only
+`STUDIO_CREDENTIAL_ENCRYPTION_KEY` as a base64-encoded random 32-byte key;
+credential operations fail closed when it is absent or malformed.
 The public `GET /api/studio/overview` reads these tables and deliberately returns
 the safe portfolio seed if Supabase is not configured, unreachable, or the new
 tables have not been migrated yet. It never returns database errors or secrets.
@@ -88,7 +93,10 @@ tables have not been migrated yet. It never returns database errors or secrets.
 Authenticated staff routes (session cookie or bearer auth) are:
 
 - `GET /api/admin/studio/workflows` and `GET /api/admin/studio/executions` — all staff roles, including viewer.
-- `POST /api/admin/studio/workflows` and `PATCH /api/admin/studio/workflows/:id` — admin/editor only.
+- `POST /api/admin/studio/workflows` and `PATCH /api/admin/studio/workflows/:id` — admin/editor only; credential references are checked before persistence.
+- `POST /api/admin/studio/workflows/:id/nodes/:nodeId/http-request` and `/execute` — execute a saved complete node configuration.
+- `POST /api/admin/studio/http-request/import-curl` — parses a bounded non-shell cURL subset and removes/rejects credential material.
+- `GET|POST /api/admin/studio/credentials`, `PATCH|DELETE /api/admin/studio/credentials/:id`, and `POST /api/admin/studio/credentials/:id/test` — encrypted credential metadata and mutations; secret/ciphertext values are never returned.
 - `POST /api/admin/studio/executions` with `{ "workflowId": "..." }` — admin/editor only; creates a persisted running execution for an existing active workflow and records `execution.create` in the audit log.
 - `POST /api/admin/studio/executions/:id/{pause|retry|cancel|approve}` — admin/editor only, with server-side status-transition validation.
 - `GET /api/admin/studio/audit-logs` — all staff roles; newest 50 mutation events.

@@ -197,25 +197,9 @@ func AdminDeleteStudioCredentialHandler(service *svc.ServiceContext) http.Handle
 			response.Error(w, http.StatusInternalServerError, "Unable to load credential.")
 			return
 		}
-		if item == nil {
+		if item == nil || item.Status != "active" {
 			response.Error(w, http.StatusNotFound, "Credential was not found.")
 			return
-		}
-		workflows, err := service.Studio.ListWorkflows(r.Context())
-		if err != nil {
-			response.Error(w, http.StatusInternalServerError, "Unable to check credential references.")
-			return
-		}
-		for _, workflow := range workflows {
-			if workflow.Definition == nil {
-				continue
-			}
-			for _, node := range workflow.Definition.Nodes {
-				if credentialID, _ := node.Config["credentialId"].(string); credentialID == id {
-					response.Error(w, http.StatusConflict, "Credential is still referenced by a workflow.")
-					return
-				}
-			}
 		}
 		if err := service.Studio.DeleteCredential(r.Context(), id); err != nil {
 			response.Error(w, http.StatusInternalServerError, "Unable to delete credential.")
@@ -248,7 +232,7 @@ func AdminTestStudioCredentialHandler(service *svc.ServiceContext) http.HandlerF
 			response.Error(w, http.StatusInternalServerError, "Unable to load credential.")
 			return
 		}
-		if item == nil {
+		if item == nil || item.Status != "active" {
 			response.Error(w, http.StatusNotFound, "Credential was not found.")
 			return
 		}

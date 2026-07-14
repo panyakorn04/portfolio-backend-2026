@@ -11,6 +11,7 @@ type StudioCredential struct {
 	ID        string    `json:"id"`
 	Name      string    `json:"name"`
 	Type      string    `json:"type"`
+	Status    string    `json:"status"`
 	CreatedAt time.Time `json:"createdAt"`
 	UpdatedAt time.Time `json:"updatedAt"`
 }
@@ -31,6 +32,7 @@ type studioCredentialRow struct {
 	ID            string `json:"id"`
 	Name          string `json:"name"`
 	Type          string `json:"type"`
+	Status        string `json:"status"`
 	EncryptedData string `json:"encryptedData"`
 	CreatedAt     string `json:"createdAt"`
 	UpdatedAt     string `json:"updatedAt"`
@@ -39,7 +41,7 @@ type studioCredentialRow struct {
 func credentialFromRow(row studioCredentialRow) StudioCredentialRecord {
 	return StudioCredentialRecord{
 		StudioCredential: StudioCredential{
-			ID: row.ID, Name: row.Name, Type: row.Type,
+			ID: row.ID, Name: row.Name, Type: row.Type, Status: row.Status,
 			CreatedAt: timeFromString(row.CreatedAt), UpdatedAt: timeFromString(row.UpdatedAt),
 		},
 		EncryptedData: row.EncryptedData,
@@ -48,7 +50,8 @@ func credentialFromRow(row studioCredentialRow) StudioCredentialRecord {
 
 func (m *StudioModel) ListCredentials(ctx context.Context) ([]StudioCredential, error) {
 	values := url.Values{
-		"select": {"id,name,type,createdAt,updatedAt"},
+		"select": {"id,name,type,status,createdAt,updatedAt"},
+		"status": {"eq.active"},
 		"order":  {"updatedAt.desc"},
 		"limit":  {"100"},
 	}
@@ -85,7 +88,7 @@ func (m *StudioModel) CreateCredential(ctx context.Context, input StudioCredenti
 		id = NewStudioCredentialID()
 	}
 	body := map[string]any{
-		"id": id, "name": input.Name, "type": input.Type,
+		"id": id, "name": input.Name, "type": input.Type, "status": "active",
 		"encryptedData": input.EncryptedData, "createdAt": now, "updatedAt": now,
 	}
 	var rows []studioCredentialRow
@@ -118,6 +121,7 @@ func (m *StudioModel) UpdateCredential(ctx context.Context, id string, input Stu
 
 func (m *StudioModel) DeleteCredential(ctx context.Context, id string) error {
 	values := url.Values{"id": {"eq." + id}}
-	_, err := m.api.request(ctx, http.MethodDelete, "StudioCredential", values, nil, "return=minimal", nil)
+	body := map[string]any{"status": "revoked", "updatedAt": time.Now().UTC().Format(time.RFC3339Nano)}
+	_, err := m.api.request(ctx, http.MethodPatch, "StudioCredential", values, body, "return=minimal", nil)
 	return err
 }

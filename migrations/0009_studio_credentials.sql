@@ -4,10 +4,23 @@ CREATE TABLE IF NOT EXISTS "StudioCredential" (
     "id"            TEXT PRIMARY KEY,
     "name"          TEXT NOT NULL CHECK (char_length("name") BETWEEN 2 AND 120),
     "type"          TEXT NOT NULL CHECK ("type" IN ('bearer', 'basic', 'header', 'query')),
+    "status"        TEXT NOT NULL DEFAULT 'active',
     "encryptedData" TEXT NOT NULL CHECK (char_length("encryptedData") BETWEEN 20 AND 20000),
     "createdAt"     TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
     "updatedAt"     TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
+
+ALTER TABLE "StudioCredential"
+    ADD COLUMN IF NOT EXISTS "status" TEXT NOT NULL DEFAULT 'active';
+DO $$
+BEGIN
+    IF NOT EXISTS (
+        SELECT 1 FROM pg_constraint WHERE conname = 'StudioCredential_status_check'
+    ) THEN
+        ALTER TABLE "StudioCredential" ADD CONSTRAINT "StudioCredential_status_check"
+            CHECK ("status" IN ('active', 'revoked'));
+    END IF;
+END $$;
 
 CREATE INDEX IF NOT EXISTS "StudioCredential_updatedAt_idx"
     ON "StudioCredential" ("updatedAt" DESC);

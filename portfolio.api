@@ -171,6 +171,33 @@ service portfolio-api {
 	@handler updateStudioWorkflow
 	patch /api/admin/studio/workflows/:id (StudioWorkflowRequest)
 
+	@handler getStudioWorkflow
+	get /api/admin/studio/workflows/:id
+
+	@handler executeStudioTrigger
+	post /api/admin/studio/workflows/:id/nodes/:nodeId/execute
+
+	@handler executeStudioHttpRequest
+	post /api/admin/studio/workflows/:id/nodes/:nodeId/http-request
+
+	@handler importStudioCurl
+	post /api/admin/studio/http-request/import-curl
+
+	@handler listStudioCredentials
+	get /api/admin/studio/credentials
+
+	@handler createStudioCredential
+	post /api/admin/studio/credentials
+
+	@handler updateStudioCredential
+	patch /api/admin/studio/credentials/:id
+
+	@handler deleteStudioCredential
+	delete /api/admin/studio/credentials/:id
+
+	@handler testStudioCredential
+	post /api/admin/studio/credentials/:id/test
+
 	@handler listStudioExecutions
 	get /api/admin/studio/executions
 

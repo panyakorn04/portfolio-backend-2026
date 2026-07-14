@@ -361,15 +361,21 @@ func redactStudioCredentialValues(value any, secrets []string) any {
 
 func filterStudioHTTPResponseHeaders(headers http.Header, secrets []string) http.Header {
 	filtered := make(http.Header, len(headers))
-	blocked := map[string]bool{
-		"authentication-info":       true,
-		"proxy-authenticate":        true,
-		"proxy-authentication-info": true,
-		"set-cookie":                true,
-		"www-authenticate":          true,
+	allowed := map[string]bool{
+		"cache-control":  true,
+		"content-length": true,
+		"content-type":   true,
+		"date":           true,
+		"etag":           true,
+		"expires":        true,
+		"last-modified":  true,
+		"retry-after":    true,
+		"vary":           true,
+		"x-request-id":   true,
 	}
 	for name, values := range headers {
-		if blocked[strings.ToLower(name)] {
+		lowerName := strings.ToLower(name)
+		if !allowed[lowerName] && !strings.HasPrefix(lowerName, "x-ratelimit-") {
 			continue
 		}
 		redacted := make([]string, len(values))

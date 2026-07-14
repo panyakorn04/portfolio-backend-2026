@@ -105,6 +105,9 @@ func containsStudioSecretJSONKey(value any) bool {
 }
 
 func validateStudioHTTPRequestSecretFreeConfig(raw map[string]any) error {
+	if containsStudioSecretJSONKey(raw) {
+		return errors.New("HTTP request secrets must use a saved credential reference")
+	}
 	if rawURL, ok := raw["url"].(string); ok && strings.TrimSpace(rawURL) != "" {
 		if parsed, err := url.Parse(rawURL); err == nil {
 			for name := range parsed.Query() {
@@ -138,7 +141,7 @@ func validateStudioHTTPRequestSecretFreeConfig(raw map[string]any) error {
 			}
 		} else if text, ok := rawHeaders.(string); ok {
 			compact := normalizeStudioSecretFieldName(text)
-			for _, marker := range []string{"authorization", "clientsecret", "accesstoken", "refreshtoken", "apikey", "apitoken"} {
+			for _, marker := range []string{"authorization", "clientsecret", "accesstoken", "refreshtoken", "idtoken", "authtoken", "apikey", "apitoken", "password", "passwd", "cookie", "signature"} {
 				if strings.Contains(compact, marker) {
 					return errors.New("HTTP request secrets must use a saved credential reference")
 				}
@@ -479,6 +482,9 @@ func parseStudioCurlCommand(command string) (studioCurlImportResult, error) {
 	if err := validateStudioHTTPRequestBody(result.Body); err != nil {
 		return studioCurlImportResult{}, err
 	}
+	if err := validateStudioHTTPRequestSecretFreeConfig(map[string]any{"body": result.Body}); err != nil {
+		return studioCurlImportResult{}, errors.New("cURL body contains credential material; create a saved credential instead")
+	}
 	return result, nil
 }
 
@@ -488,7 +494,7 @@ func addStudioCurlHeader(result *studioCurlImportResult, raw string) error {
 	if !found || name == "" {
 		return errors.New("cURL header is invalid")
 	}
-	if strings.EqualFold(name, "Proxy-Authorization") {
+	if isStudioSecretFieldName(name) || strings.EqualFold(name, "Proxy-Authorization") {
 		result.Warnings = append(result.Warnings, fmt.Sprintf("Sensitive header %q was removed. Select a saved credential instead.", name))
 		return nil
 	}

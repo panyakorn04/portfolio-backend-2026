@@ -699,8 +699,8 @@ func AdminExecuteStudioHttpRequestHandler(s *svc.ServiceContext) http.HandlerFun
 				response.Error(w, http.StatusInternalServerError, "Unable to load HTTP request credential.")
 				return
 			}
-			if record == nil {
-				response.Error(w, http.StatusConflict, "The selected HTTP request credential was not found.")
+			if record == nil || record.Status != "active" {
+				response.Error(w, http.StatusConflict, "The selected HTTP request credential is unavailable.")
 				return
 			}
 			data, decryptErr := s.StudioCredentialCipher.DecryptFor(studioCredentialCipherScope(record.ID, record.Type), record.EncryptedData)
@@ -889,6 +889,25 @@ func studioWorkflowMutation(s *svc.ServiceContext, create bool) http.HandlerFunc
 		if msg != "" {
 			response.Error(w, 400, msg)
 			return
+		}
+		if in.Definition != nil {
+			checkedCredentials := map[string]bool{}
+			for _, node := range in.Definition.Nodes {
+				credentialID, _ := node.Config["credentialId"].(string)
+				if node.Type != "http-request" || credentialID == "" || checkedCredentials[credentialID] {
+					continue
+				}
+				checkedCredentials[credentialID] = true
+				credential, findErr := s.Studio.FindCredential(r.Context(), credentialID)
+				if findErr != nil {
+					response.Error(w, http.StatusInternalServerError, "Unable to validate workflow credential references.")
+					return
+				}
+				if credential == nil || credential.Status != "active" {
+					response.Error(w, http.StatusConflict, "A referenced workflow credential is unavailable.")
+					return
+				}
+			}
 		}
 		var item *model.StudioWorkflow
 		var err error

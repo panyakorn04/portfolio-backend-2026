@@ -202,9 +202,12 @@ func TestFilterStudioHTTPResponseHeadersRedactsAuthenticationMaterial(t *testing
 		"Content-Type":     {"application/json"},
 		"Set-Cookie":       {"session=secret"},
 		"WWW-Authenticate": {"Bearer realm=secret"},
+		"Authorization":    {"Bearer secret"},
+		"X-API-Key":        {"secret"},
+		"X-Client-Secret":  {"secret"},
 	}
 	filtered := filterStudioHTTPResponseHeaders(headers, []string{"secret"})
-	if filtered.Get("Content-Type") != "application/json" || filtered.Get("Set-Cookie") != "" || filtered.Get("WWW-Authenticate") != "" {
+	if filtered.Get("Content-Type") != "application/json" || filtered.Get("Set-Cookie") != "" || filtered.Get("WWW-Authenticate") != "" || filtered.Get("Authorization") != "" || filtered.Get("X-API-Key") != "" || filtered.Get("X-Client-Secret") != "" {
 		t.Fatalf("unexpected filtered headers: %#v", filtered)
 	}
 	body := map[string]any{"token": "prefix-secret-suffix", "items": []any{"secret", "safe"}}

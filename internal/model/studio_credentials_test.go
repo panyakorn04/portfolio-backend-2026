@@ -12,21 +12,25 @@ func TestStudioCredentialModelCRUDKeepsCiphertextPrivate(t *testing.T) {
 	t.Parallel()
 
 	var created map[string]any
+	var revoked map[string]any
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		switch r.Method {
 		case http.MethodGet:
-			if r.URL.Query().Get("select") == "id,name,type,createdAt,updatedAt" {
-				_, _ = w.Write([]byte(`[{"id":"cred-1","name":"API token","type":"bearer","createdAt":"2026-01-01T00:00:00Z","updatedAt":"2026-01-01T00:00:00Z"}]`))
+			if r.URL.Query().Get("select") == "id,name,type,status,createdAt,updatedAt" {
+				_, _ = w.Write([]byte(`[{"id":"cred-1","name":"API token","type":"bearer","status":"active","createdAt":"2026-01-01T00:00:00Z","updatedAt":"2026-01-01T00:00:00Z"}]`))
 				return
 			}
-			_, _ = w.Write([]byte(`[{"id":"cred-1","name":"API token","type":"bearer","encryptedData":"v1:ciphertext","createdAt":"2026-01-01T00:00:00Z","updatedAt":"2026-01-01T00:00:00Z"}]`))
+			_, _ = w.Write([]byte(`[{"id":"cred-1","name":"API token","type":"bearer","status":"active","encryptedData":"v1:ciphertext","createdAt":"2026-01-01T00:00:00Z","updatedAt":"2026-01-01T00:00:00Z"}]`))
 		case http.MethodPost:
 			if err := json.NewDecoder(r.Body).Decode(&created); err != nil {
 				t.Fatal(err)
 			}
-			_, _ = w.Write([]byte(`[{"id":"cred-1","name":"API token","type":"bearer","encryptedData":"v1:ciphertext","createdAt":"2026-01-01T00:00:00Z","updatedAt":"2026-01-01T00:00:00Z"}]`))
-		case http.MethodDelete:
+			_, _ = w.Write([]byte(`[{"id":"cred-1","name":"API token","type":"bearer","status":"active","encryptedData":"v1:ciphertext","createdAt":"2026-01-01T00:00:00Z","updatedAt":"2026-01-01T00:00:00Z"}]`))
+		case http.MethodPatch:
+			if err := json.NewDecoder(r.Body).Decode(&revoked); err != nil {
+				t.Fatal(err)
+			}
 			w.WriteHeader(http.StatusNoContent)
 		default:
 			t.Fatalf("unexpected method %s", r.Method)
@@ -58,6 +62,9 @@ func TestStudioCredentialModelCRUDKeepsCiphertextPrivate(t *testing.T) {
 	}
 	if err := model.DeleteCredential(context.Background(), "cred-1"); err != nil {
 		t.Fatal(err)
+	}
+	if revoked["status"] != "revoked" {
+		t.Fatalf("credential delete must revoke instead of physically deleting: %#v", revoked)
 	}
 }
 

@@ -102,7 +102,14 @@ func TestParseStudioCurlCommandSanitizesCredentials(t *testing.T) {
 		t.Fatalf("query or credential sanitization failed: %#v", result)
 	}
 	if len(result.Warnings) == 0 {
-		t.Fatal("credential stripping must produce a warning")
+		t.Fatal("credential removal must emit a warning")
+	}
+	headerResult, err := parseStudioCurlCommand(`curl 'https://example.com' -H 'X-Client-Secret: hidden'`)
+	if err != nil || len(headerResult.Headers) != 0 || len(headerResult.Warnings) == 0 {
+		t.Fatalf("sensitive custom header was not sanitized: result=%#v err=%v", headerResult, err)
+	}
+	if _, err := parseStudioCurlCommand(`curl 'https://example.com' --data '{"access_token":"hidden"}'`); err == nil {
+		t.Fatal("cURL bodies containing credential material must be rejected")
 	}
 }
 
@@ -114,6 +121,8 @@ func TestStudioHTTPRequestSecretPolicyAppliesToDrafts(t *testing.T) {
 		{"url": "https://example.com?%20api_key=value"},
 		{"queryParameters": []any{map[string]any{"name": "refresh_token", "value": "value"}}},
 		{"headers": map[string]any{"X-Client-Secret": "value"}},
+		{"headers": `{"refresh_token":"value"`},
+		{"body": map[string]any{"password": "value"}},
 		{"body": `{"nested":{"access_token":"value"}}`},
 		{"body": "password=value"},
 	}
