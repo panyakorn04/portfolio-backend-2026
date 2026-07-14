@@ -49,28 +49,48 @@ type StudioWorkflow struct {
 }
 
 type StudioExecution struct {
-	ID         string    `json:"id"`
-	WorkflowID string    `json:"workflowId"`
-	Workflow   string    `json:"workflow"`
-	Status     string    `json:"status"`
-	StartedAt  time.Time `json:"startedAt"`
-	DurationMS int       `json:"durationMs"`
-	Cost       float64   `json:"cost"`
-	CreatedAt  time.Time `json:"createdAt"`
-	UpdatedAt  time.Time `json:"updatedAt"`
+	ID                      string     `json:"id"`
+	WorkflowID              string     `json:"workflowId"`
+	Workflow                string     `json:"workflow"`
+	Status                  string     `json:"status"`
+	TriggerNodeID           string     `json:"triggerNodeId,omitempty"`
+	TargetNodeID            string     `json:"targetNodeId,omitempty"`
+	Mode                    string     `json:"mode,omitempty"`
+	Source                  string     `json:"source,omitempty"`
+	SourceKey               string     `json:"sourceKey,omitempty"`
+	WorkflowUpdatedAt       *time.Time `json:"workflowUpdatedAt,omitempty"`
+	CompletedAt             *time.Time `json:"completedAt,omitempty"`
+	ErrorCode               string     `json:"errorCode,omitempty"`
+	ErrorMessage            string     `json:"errorMessage,omitempty"`
+	CancellationRequestedAt *time.Time `json:"cancellationRequestedAt,omitempty"`
+	LeaseOwner              string     `json:"-"`
+	LeaseUntil              *time.Time `json:"-"`
+	RetryOfExecutionID      string     `json:"retryOfExecutionId,omitempty"`
+	StartedAt               time.Time  `json:"startedAt"`
+	DurationMS              int        `json:"durationMs"`
+	Cost                    float64    `json:"cost"`
+	CreatedAt               time.Time  `json:"createdAt"`
+	UpdatedAt               time.Time  `json:"updatedAt"`
 }
 
 type StudioExecutionStage struct {
-	ExecutionID string         `json:"executionId"`
-	Position    int            `json:"position"`
-	Name        string         `json:"name"`
-	Status      string         `json:"status"`
-	Detail      string         `json:"detail"`
-	Tool        *string        `json:"tool,omitempty"`
-	Metadata    map[string]any `json:"metadata"`
-	StartedAt   *time.Time     `json:"startedAt,omitempty"`
-	CompletedAt *time.Time     `json:"completedAt,omitempty"`
-	UpdatedAt   time.Time      `json:"updatedAt"`
+	ExecutionID  string           `json:"executionId"`
+	Position     int              `json:"position"`
+	NodeID       string           `json:"nodeId,omitempty"`
+	NodeType     string           `json:"nodeType,omitempty"`
+	Name         string           `json:"name"`
+	Status       string           `json:"status"`
+	Detail       string           `json:"detail"`
+	Tool         *string          `json:"tool,omitempty"`
+	Metadata     map[string]any   `json:"metadata"`
+	Input        []map[string]any `json:"input,omitempty"`
+	Output       []map[string]any `json:"output,omitempty"`
+	ErrorCode    string           `json:"errorCode,omitempty"`
+	ErrorMessage string           `json:"errorMessage,omitempty"`
+	DurationMS   int              `json:"durationMs"`
+	StartedAt    *time.Time       `json:"startedAt,omitempty"`
+	CompletedAt  *time.Time       `json:"completedAt,omitempty"`
+	UpdatedAt    time.Time        `json:"updatedAt"`
 }
 
 type StudioWorkflowInput struct {
@@ -93,41 +113,74 @@ type studioWorkflowRow struct {
 	Definition  *StudioWorkflowDefinition `json:"definition"`
 }
 type studioExecutionRow struct {
-	ID         string  `json:"id"`
-	WorkflowID string  `json:"workflowId"`
-	Workflow   string  `json:"workflow"`
-	Status     string  `json:"status"`
-	StartedAt  string  `json:"startedAt"`
-	CreatedAt  string  `json:"createdAt"`
-	UpdatedAt  string  `json:"updatedAt"`
-	DurationMS int     `json:"durationMs"`
-	Cost       float64 `json:"cost"`
+	ID                      string  `json:"id"`
+	WorkflowID              string  `json:"workflowId"`
+	Workflow                string  `json:"workflow"`
+	Status                  string  `json:"status"`
+	TriggerNodeID           string  `json:"triggerNodeId"`
+	TargetNodeID            string  `json:"targetNodeId"`
+	Mode                    string  `json:"mode"`
+	Source                  string  `json:"source"`
+	SourceKey               string  `json:"sourceKey"`
+	WorkflowUpdatedAt       *string `json:"workflowUpdatedAt"`
+	CompletedAt             *string `json:"completedAt"`
+	ErrorCode               string  `json:"errorCode"`
+	ErrorMessage            string  `json:"errorMessage"`
+	CancellationRequestedAt *string `json:"cancellationRequestedAt"`
+	LeaseOwner              string  `json:"leaseOwner"`
+	LeaseUntil              *string `json:"leaseUntil"`
+	RetryOfExecutionID      string  `json:"retryOfExecutionId"`
+	StartedAt               string  `json:"startedAt"`
+	CreatedAt               string  `json:"createdAt"`
+	UpdatedAt               string  `json:"updatedAt"`
+	DurationMS              int     `json:"durationMs"`
+	Cost                    float64 `json:"cost"`
 }
 
 type studioExecutionStageRow struct {
-	ExecutionID string         `json:"executionId"`
-	Position    int            `json:"position"`
-	Name        string         `json:"name"`
-	Status      string         `json:"status"`
-	Detail      string         `json:"detail"`
-	Tool        *string        `json:"tool"`
-	Metadata    map[string]any `json:"metadata"`
-	StartedAt   *string        `json:"startedAt"`
-	CompletedAt *string        `json:"completedAt"`
-	UpdatedAt   string         `json:"updatedAt"`
+	ExecutionID  string           `json:"executionId"`
+	Position     int              `json:"position"`
+	NodeID       string           `json:"nodeId"`
+	NodeType     string           `json:"nodeType"`
+	Name         string           `json:"name"`
+	Status       string           `json:"status"`
+	Detail       string           `json:"detail"`
+	Tool         *string          `json:"tool"`
+	Metadata     map[string]any   `json:"metadata"`
+	Input        []map[string]any `json:"input"`
+	Output       []map[string]any `json:"output"`
+	ErrorCode    string           `json:"errorCode"`
+	ErrorMessage string           `json:"errorMessage"`
+	DurationMS   int              `json:"durationMs"`
+	StartedAt    *string          `json:"startedAt"`
+	CompletedAt  *string          `json:"completedAt"`
+	UpdatedAt    string           `json:"updatedAt"`
 }
 
 func workflowFromRow(r studioWorkflowRow) StudioWorkflow {
 	return StudioWorkflow{ID: r.ID, Name: r.Name, Description: r.Description, Category: r.Category, Status: r.Status, Runs: r.Runs, Success: r.Success, Nodes: r.Nodes, Definition: r.Definition, CreatedAt: timeFromString(r.CreatedAt), UpdatedAt: timeFromString(r.UpdatedAt)}
 }
 func executionFromRow(r studioExecutionRow) StudioExecution {
-	return StudioExecution{ID: r.ID, WorkflowID: r.WorkflowID, Workflow: r.Workflow, Status: r.Status, StartedAt: timeFromString(r.StartedAt), DurationMS: r.DurationMS, Cost: r.Cost, CreatedAt: timeFromString(r.CreatedAt), UpdatedAt: timeFromString(r.UpdatedAt)}
+	return StudioExecution{
+		ID: r.ID, WorkflowID: r.WorkflowID, Workflow: r.Workflow, Status: r.Status,
+		TriggerNodeID: r.TriggerNodeID, TargetNodeID: r.TargetNodeID, Mode: r.Mode, Source: r.Source, SourceKey: r.SourceKey,
+		WorkflowUpdatedAt: timePtrFromString(r.WorkflowUpdatedAt), CompletedAt: timePtrFromString(r.CompletedAt),
+		ErrorCode: r.ErrorCode, ErrorMessage: r.ErrorMessage, CancellationRequestedAt: timePtrFromString(r.CancellationRequestedAt),
+		LeaseOwner: r.LeaseOwner, LeaseUntil: timePtrFromString(r.LeaseUntil), RetryOfExecutionID: r.RetryOfExecutionID,
+		StartedAt: timeFromString(r.StartedAt), DurationMS: r.DurationMS, Cost: r.Cost,
+		CreatedAt: timeFromString(r.CreatedAt), UpdatedAt: timeFromString(r.UpdatedAt),
+	}
 }
 func executionStageFromRow(r studioExecutionStageRow) StudioExecutionStage {
-	return StudioExecutionStage{ExecutionID: r.ExecutionID, Position: r.Position, Name: r.Name, Status: r.Status, Detail: r.Detail, Tool: r.Tool, Metadata: r.Metadata, StartedAt: timePtrFromString(r.StartedAt), CompletedAt: timePtrFromString(r.CompletedAt), UpdatedAt: timeFromString(r.UpdatedAt)}
+	return StudioExecutionStage{
+		ExecutionID: r.ExecutionID, Position: r.Position, NodeID: r.NodeID, NodeType: r.NodeType,
+		Name: r.Name, Status: r.Status, Detail: r.Detail, Tool: r.Tool, Metadata: r.Metadata,
+		Input: r.Input, Output: r.Output, ErrorCode: r.ErrorCode, ErrorMessage: r.ErrorMessage, DurationMS: r.DurationMS,
+		StartedAt: timePtrFromString(r.StartedAt), CompletedAt: timePtrFromString(r.CompletedAt), UpdatedAt: timeFromString(r.UpdatedAt),
+	}
 }
 func (m *StudioModel) ListExecutionStages(ctx context.Context, executionID string) ([]StudioExecutionStage, error) {
-	v := url.Values{"executionId": {"eq." + executionID}, "select": {"executionId,position,name,status,detail,tool,metadata,startedAt,completedAt,updatedAt"}, "order": {"position.asc"}, "limit": {"100"}}
+	v := url.Values{"executionId": {"eq." + executionID}, "select": {"executionId,position,nodeId,nodeType,name,status,detail,tool,metadata,input,output,errorCode,errorMessage,durationMs,startedAt,completedAt,updatedAt"}, "order": {"position.asc"}, "limit": {"100"}}
 	var rows []studioExecutionStageRow
 	if _, err := m.api.request(ctx, http.MethodGet, "StudioExecutionStage", v, nil, "", &rows); err != nil {
 		return nil, err

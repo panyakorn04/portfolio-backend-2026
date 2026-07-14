@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"flag"
 	"fmt"
 	"os"
@@ -32,6 +33,9 @@ func main() {
 	defer ctx.Close()
 
 	handler.RegisterHandlers(server, ctx)
+	runner := handler.NewStudioExecutionRunner(ctx)
+	runner.Start(context.Background())
+	defer runner.Close()
 
 	fmt.Printf("Starting portfolio-api at %s:%d...\n", c.Host, c.Port)
 	server.Start()

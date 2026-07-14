@@ -28,6 +28,10 @@ func publicExecutionStages(stages []model.StudioExecutionStage) []model.StudioEx
 	out := make([]model.StudioExecutionStage, len(stages))
 	for i, stage := range stages {
 		stage.Metadata = map[string]any{}
+		stage.Input = nil
+		stage.Output = nil
+		stage.ErrorCode = ""
+		stage.ErrorMessage = ""
 		out[i] = stage
 	}
 	return out

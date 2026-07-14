@@ -80,7 +80,11 @@ type (
 	}
 
 	StudioExecutionRequest {
-		WorkflowID string `json:"workflowId"`
+		WorkflowID    string `json:"workflowId"`
+		TriggerNodeID string `json:"triggerNodeId,optional"`
+		TargetNodeID  string `json:"targetNodeId,optional"`
+		Mode          string `json:"mode,optional"`
+		SourceKey     string `json:"sourceKey,optional"`
 	}
 )
 
@@ -108,6 +112,12 @@ service portfolio-api {
 
 	@handler studioExecutionEvents
 	get /api/studio/executions/:id/events
+
+	@handler studioWebhookGet
+	get /api/studio/webhooks/:id/:nodeId
+
+	@handler studioWebhookPost
+	post /api/studio/webhooks/:id/:nodeId
 }
 
 @server (
@@ -174,6 +184,18 @@ service portfolio-api {
 	@handler getStudioWorkflow
 	get /api/admin/studio/workflows/:id
 
+	@handler deleteStudioWorkflow
+	delete /api/admin/studio/workflows/:id
+
+	@handler enqueueStudioWorkflow
+	post /api/admin/studio/workflows/:id/executions
+
+	@handler executeStudioPreviousNodes
+	post /api/admin/studio/workflows/:id/nodes/:nodeId/execute-previous
+
+	@handler studioWebhookURL
+	get /api/admin/studio/workflows/:id/nodes/:nodeId/webhook-url
+
 	@handler executeStudioTrigger
 	post /api/admin/studio/workflows/:id/nodes/:nodeId/execute
 
@@ -203,6 +225,9 @@ service portfolio-api {
 
 	@handler createStudioExecution
 	post /api/admin/studio/executions (StudioExecutionRequest)
+
+	@handler getStudioExecution
+	get /api/admin/studio/executions/:id
 
 	@handler listStudioAuditLogs
 	get /api/admin/studio/audit-logs

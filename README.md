@@ -50,7 +50,7 @@ cp .env.example .env
 
 go mod tidy
 
-# Apply migrations in numeric order through 0009_studio_credentials.sql.
+# Apply migrations in numeric order through 0010_studio_graph_execution.sql.
 
 # Create/update an admin user through Supabase REST
 set -a; source .env; set +a
@@ -83,9 +83,13 @@ Optional Redis article cache and distributed rate-limit env:
 stages and idempotently seeds existing runs from their workflow nodes.
 `migrations/0008_studio_workflow_definition.sql` adds the private typed workflow
 graph definition. `migrations/0009_studio_credentials.sql` adds encrypted HTTP
-credential storage and the matching audit allowlist. Configure a backend-only
-`STUDIO_CREDENTIAL_ENCRYPTION_KEY` as a base64-encoded random 32-byte key;
-credential operations fail closed when it is absent or malformed.
+credential storage and the matching audit allowlist. `migrations/0010_studio_graph_execution.sql`
+adds the database-backed execution queue, worker leases, cancellation/idempotency
+RPCs, persisted node input/output, and workflow-history cascade cleanup. Configure
+a backend-only `STUDIO_CREDENTIAL_ENCRYPTION_KEY` as a base64-encoded random 32-byte key;
+credential operations fail closed when it is absent or malformed. The same key is
+used as HMAC key material for scoped Studio webhook capabilities and is never
+included in workflow definitions.
 The public `GET /api/studio/overview` reads these tables and deliberately returns
 the safe portfolio seed if Supabase is not configured, unreachable, or the new
 tables have not been migrated yet. It never returns database errors or secrets.
@@ -97,8 +101,13 @@ Authenticated staff routes (session cookie or bearer auth) are:
 - `POST /api/admin/studio/workflows/:id/nodes/:nodeId/http-request` and `/execute` — execute a saved complete node configuration.
 - `POST /api/admin/studio/http-request/import-curl` — parses a bounded non-shell cURL subset and removes/rejects credential material.
 - `GET|POST /api/admin/studio/credentials`, `PATCH|DELETE /api/admin/studio/credentials/:id`, and `POST /api/admin/studio/credentials/:id/test` — encrypted credential metadata and mutations; secret/ciphertext values are never returned.
-- `POST /api/admin/studio/executions` with `{ "workflowId": "..." }` — admin/editor only; creates a persisted running execution for an existing active workflow and records `execution.create` in the audit log.
-- `POST /api/admin/studio/executions/:id/{pause|retry|cancel|approve}` — admin/editor only, with server-side status-transition validation.
+- `POST /api/admin/studio/executions` or `POST /api/admin/studio/workflows/:id/executions` — admin/editor only; atomically queues a validated graph path. Optional `sourceKey` makes starts idempotent.
+- `POST /api/admin/studio/workflows/:id/nodes/:nodeId/execute-previous` — runs the selected trigger path through the target node and persists every node input/output.
+- `GET /api/admin/studio/executions/:id` — authenticated execution and stage details, including persisted input/output; these private fields are excluded from public telemetry.
+- `POST /api/admin/studio/executions/:id/{retry|cancel}` — retries terminal runs or atomically requests cancellation of queued/running work.
+- `DELETE /api/admin/studio/workflows/:id` — admin-only; rejects active runs and cascade-deletes terminal execution history.
+- `GET /api/admin/studio/workflows/:id/nodes/:nodeId/webhook-url` — admin/editor-only scoped webhook path/header capability. Public webhook GET/POST requests require the returned HMAC token in `X-Studio-Webhook-Token`.
+- Active schedule triggers are evaluated once per minute in their configured timezone and deduplicated by persisted source key.
 - `GET /api/admin/studio/audit-logs` — all staff roles; newest 50 mutation events.
 
 Login is limited to 5 attempts per direct client IP per 15 minutes. Studio
