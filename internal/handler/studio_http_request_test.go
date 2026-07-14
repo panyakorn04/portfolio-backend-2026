@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"fmt"
 	"net"
 	"net/http"
 	"net/http/httptest"
@@ -202,9 +203,14 @@ func TestFilterStudioHTTPResponseHeadersRedactsAuthenticationMaterial(t *testing
 		"Set-Cookie":       {"session=secret"},
 		"WWW-Authenticate": {"Bearer realm=secret"},
 	}
-	filtered := filterStudioHTTPResponseHeaders(headers)
+	filtered := filterStudioHTTPResponseHeaders(headers, []string{"secret"})
 	if filtered.Get("Content-Type") != "application/json" || filtered.Get("Set-Cookie") != "" || filtered.Get("WWW-Authenticate") != "" {
 		t.Fatalf("unexpected filtered headers: %#v", filtered)
+	}
+	body := map[string]any{"token": "prefix-secret-suffix", "items": []any{"secret", "safe"}}
+	redacted := redactStudioCredentialValues(body, []string{"secret"}).(map[string]any)
+	if strings.Contains(fmt.Sprintf("%v", redacted), "secret") || !strings.Contains(fmt.Sprintf("%v", redacted), "[REDACTED]") {
+		t.Fatalf("credential value leaked after redaction: %#v", redacted)
 	}
 }
 

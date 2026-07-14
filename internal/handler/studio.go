@@ -689,6 +689,7 @@ func AdminExecuteStudioHttpRequestHandler(s *svc.ServiceContext) http.HandlerFun
 			req.Header.Set(name, value)
 		}
 
+		credentialSecrets := []string{}
 		if requestConfig.AuthMode == "credential" {
 			if !requireStudioCredentialCipher(w, s) {
 				return
@@ -707,6 +708,7 @@ func AdminExecuteStudioHttpRequestHandler(s *svc.ServiceContext) http.HandlerFun
 				response.Error(w, http.StatusConflict, "The selected HTTP request credential could not be decrypted.")
 				return
 			}
+			credentialSecrets = studioCredentialSecretValues(data)
 			if err := applyStudioCredential(req, &studioResolvedCredential{Type: record.Type, Data: data}); err != nil {
 				response.Error(w, http.StatusConflict, "The selected HTTP request credential is invalid.")
 				return
@@ -765,13 +767,14 @@ func AdminExecuteStudioHttpRequestHandler(s *svc.ServiceContext) http.HandlerFun
 			}
 		}
 
+		parsedBody = redactStudioCredentialValues(parsedBody, credentialSecrets)
 		outputJSON := map[string]any{
 			"statusCode": resp.StatusCode,
 			"status":     resp.Status,
 			"body":       parsedBody,
 		}
 		if requestConfig.Options.IncludeResponseHeaders {
-			outputJSON["headers"] = filterStudioHTTPResponseHeaders(resp.Header)
+			outputJSON["headers"] = filterStudioHTTPResponseHeaders(resp.Header, credentialSecrets)
 		}
 		executedAt := time.Now().UTC().Format(time.RFC3339Nano)
 		item := studioTriggerOutput{

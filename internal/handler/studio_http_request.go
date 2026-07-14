@@ -324,7 +324,42 @@ func validateStudioHTTPRequestBody(body string) error {
 	return nil
 }
 
-func filterStudioHTTPResponseHeaders(headers http.Header) http.Header {
+func studioCredentialSecretValues(data map[string]string) []string {
+	values := make([]string, 0, len(data))
+	for name, value := range data {
+		if name == "name" || value == "" {
+			continue
+		}
+		values = append(values, value)
+	}
+	return values
+}
+
+func redactStudioCredentialValues(value any, secrets []string) any {
+	switch typed := value.(type) {
+	case string:
+		for _, secret := range secrets {
+			if typed == secret {
+				return "[REDACTED]"
+			}
+			if len(secret) >= 4 {
+				typed = strings.ReplaceAll(typed, secret, "[REDACTED]")
+			}
+		}
+		return typed
+	case map[string]any:
+		for key, child := range typed {
+			typed[key] = redactStudioCredentialValues(child, secrets)
+		}
+	case []any:
+		for index, child := range typed {
+			typed[index] = redactStudioCredentialValues(child, secrets)
+		}
+	}
+	return value
+}
+
+func filterStudioHTTPResponseHeaders(headers http.Header, secrets []string) http.Header {
 	filtered := make(http.Header, len(headers))
 	blocked := map[string]bool{
 		"authentication-info":       true,
@@ -337,7 +372,11 @@ func filterStudioHTTPResponseHeaders(headers http.Header) http.Header {
 		if blocked[strings.ToLower(name)] {
 			continue
 		}
-		filtered[name] = append([]string(nil), values...)
+		redacted := make([]string, len(values))
+		for index, value := range values {
+			redacted[index], _ = redactStudioCredentialValues(value, secrets).(string)
+		}
+		filtered[name] = redacted
 	}
 	return filtered
 }
