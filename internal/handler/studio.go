@@ -768,9 +768,10 @@ func AdminExecuteStudioHttpRequestHandler(s *svc.ServiceContext) http.HandlerFun
 		}
 
 		parsedBody = redactStudioCredentialValues(parsedBody, credentialSecrets)
+		redactedStatus, _ := redactStudioCredentialValues(resp.Status, credentialSecrets).(string)
 		outputJSON := map[string]any{
 			"statusCode": resp.StatusCode,
-			"status":     resp.Status,
+			"status":     redactedStatus,
 			"body":       parsedBody,
 		}
 		if requestConfig.Options.IncludeResponseHeaders {

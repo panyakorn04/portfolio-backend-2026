@@ -104,7 +104,8 @@ func executeStudioHTTPRequestNode(ctx context.Context, service *svc.ServiceConte
 		}
 	}
 	parsedBody = redactStudioCredentialValues(parsedBody, credentialSecrets)
-	outputJSON := map[string]any{"statusCode": responseValue.StatusCode, "status": responseValue.Status, "body": parsedBody}
+	redactedStatus, _ := redactStudioCredentialValues(responseValue.Status, credentialSecrets).(string)
+	outputJSON := map[string]any{"statusCode": responseValue.StatusCode, "status": redactedStatus, "body": parsedBody}
 	if requestConfig.Options.IncludeResponseHeaders {
 		outputJSON["headers"] = filterStudioHTTPResponseHeaders(responseValue.Header, credentialSecrets)
 	}

@@ -348,9 +348,15 @@ func redactStudioCredentialValues(value any, secrets []string) any {
 		}
 		return typed
 	case map[string]any:
+		redacted := make(map[string]any, len(typed))
 		for key, child := range typed {
-			typed[key] = redactStudioCredentialValues(child, secrets)
+			redactedKey, _ := redactStudioCredentialValues(key, secrets).(string)
+			if redactedKey == "" {
+				redactedKey = "[REDACTED]"
+			}
+			redacted[redactedKey] = redactStudioCredentialValues(child, secrets)
 		}
+		return redacted
 	case []any:
 		for index, child := range typed {
 			typed[index] = redactStudioCredentialValues(child, secrets)

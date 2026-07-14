@@ -210,10 +210,14 @@ func TestFilterStudioHTTPResponseHeadersRedactsAuthenticationMaterial(t *testing
 	if filtered.Get("Content-Type") != "application/json" || filtered.Get("Set-Cookie") != "" || filtered.Get("WWW-Authenticate") != "" || filtered.Get("Authorization") != "" || filtered.Get("X-API-Key") != "" || filtered.Get("X-Client-Secret") != "" {
 		t.Fatalf("unexpected filtered headers: %#v", filtered)
 	}
-	body := map[string]any{"token": "prefix-secret-suffix", "items": []any{"secret", "safe"}}
+	body := map[string]any{"token": "prefix-secret-suffix", "secret": "safe-key-value", "items": []any{"secret", "safe"}}
 	redacted := redactStudioCredentialValues(body, []string{"secret"}).(map[string]any)
 	if strings.Contains(fmt.Sprintf("%v", redacted), "secret") || !strings.Contains(fmt.Sprintf("%v", redacted), "[REDACTED]") {
 		t.Fatalf("credential value leaked after redaction: %#v", redacted)
+	}
+	status, _ := redactStudioCredentialValues("200 secret", []string{"secret"}).(string)
+	if status != "200 [REDACTED]" {
+		t.Fatalf("credential value leaked through HTTP reason phrase: %q", status)
 	}
 }
 

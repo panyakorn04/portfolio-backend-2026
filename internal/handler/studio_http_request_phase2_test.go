@@ -95,21 +95,22 @@ func TestParseStudioCurlCommandSanitizesCredentials(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if result.Method != http.MethodPost || result.URL != "https://example.com/items" || result.Body != `{"name":"demo"}` {
+	if result.Method != http.MethodPost || result.URL != "https://example.com/items" || result.Body != "" {
 		t.Fatalf("unexpected import: %#v", result)
 	}
-	if len(result.QueryParameters) != 1 || result.QueryParameters[0].Name != "limit" || result.Headers["Authorization"] != "" {
+	if len(result.QueryParameters) != 1 || result.QueryParameters[0].Name != "limit" || result.Headers["Authorization"] != "" || result.Headers["Content-Type"] != "application/json" {
 		t.Fatalf("query or credential sanitization failed: %#v", result)
 	}
 	if len(result.Warnings) == 0 {
 		t.Fatal("credential removal must emit a warning")
 	}
-	headerResult, err := parseStudioCurlCommand(`curl 'https://example.com' -H 'X-Client-Secret: hidden'`)
-	if err != nil || len(headerResult.Headers) != 0 || len(headerResult.Warnings) == 0 {
-		t.Fatalf("sensitive custom header was not sanitized: result=%#v err=%v", headerResult, err)
+	headerResult, err := parseStudioCurlCommand(`curl 'https://example.com' -H 'X-Client-Secret: hidden' -H 'X-Webhook-Secret: hidden' -H 'X-Custom-Token: sk-live-example'`)
+	if err != nil || len(headerResult.Headers) != 0 || len(headerResult.Warnings) < 3 {
+		t.Fatalf("custom headers were not stripped fail-closed: result=%#v err=%v", headerResult, err)
 	}
-	if _, err := parseStudioCurlCommand(`curl 'https://example.com' --data '{"access_token":"hidden"}'`); err == nil {
-		t.Fatal("cURL bodies containing credential material must be rejected")
+	bodyResult, err := parseStudioCurlCommand(`curl 'https://example.com' --data '{"payload":"sk-live-example"}'`)
+	if err != nil || bodyResult.Body != "" || len(bodyResult.Warnings) == 0 {
+		t.Fatalf("cURL body was not stripped fail-closed: result=%#v err=%v", bodyResult, err)
 	}
 }
 

@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"mime"
 	"net/http"
 	"net/url"
 	"strings"
@@ -426,11 +427,10 @@ func parseStudioCurlCommand(command string) (studioCurlImportResult, error) {
 				return studioCurlImportResult{}, err
 			}
 		case token == "-d" || token == "--data" || token == "--data-raw" || token == "--data-binary":
-			value, valueErr := next()
-			if valueErr != nil {
+			if _, valueErr := next(); valueErr != nil {
 				return studioCurlImportResult{}, valueErr
 			}
-			result.Body = value
+			result.Warnings = append(result.Warnings, "Request body was removed because imported body content cannot be proven secret-free. Add a non-secret body manually.")
 			if !explicitMethod {
 				result.Method = http.MethodPost
 			}
@@ -494,18 +494,18 @@ func addStudioCurlHeader(result *studioCurlImportResult, raw string) error {
 	if !found || name == "" {
 		return errors.New("cURL header is invalid")
 	}
-	if isStudioSecretFieldName(name) || strings.EqualFold(name, "Proxy-Authorization") {
-		result.Warnings = append(result.Warnings, fmt.Sprintf("Sensitive header %q was removed. Select a saved credential instead.", name))
+	if !strings.EqualFold(name, "Content-Type") {
+		result.Warnings = append(result.Warnings, fmt.Sprintf("Header %q was removed because imported header values cannot be proven secret-free. Add a non-secret header manually.", name))
 		return nil
 	}
-	if err := validateStudioHTTPHeaders(map[string]string{name: value}); err != nil {
-		if validateStudioCredentialHeaders(map[string]string{name: value}) == nil {
-			result.Warnings = append(result.Warnings, fmt.Sprintf("Sensitive header %q was removed. Select a saved credential instead.", name))
-			return nil
-		}
+	mediaType, _, err := mime.ParseMediaType(value)
+	if err != nil || mediaType == "" {
+		return errors.New("cURL Content-Type header is invalid")
+	}
+	if err := validateStudioHTTPHeaders(map[string]string{"Content-Type": mediaType}); err != nil {
 		return err
 	}
-	result.Headers[name] = value
+	result.Headers["Content-Type"] = mediaType
 	return nil
 }
 
