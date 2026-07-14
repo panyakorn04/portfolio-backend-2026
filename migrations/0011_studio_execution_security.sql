@@ -122,6 +122,31 @@ BEGIN
 END;
 $$;
 
+CREATE OR REPLACE FUNCTION "deleteStudioWorkflowIfIdle"(
+    "workflowId" TEXT
+) RETURNS BOOLEAN
+LANGUAGE plpgsql SECURITY INVOKER SET search_path = public AS $$
+DECLARE locked_id TEXT;
+BEGIN
+    SELECT workflow."id" INTO locked_id
+      FROM "StudioWorkflow" workflow
+     WHERE workflow."id" = "workflowId"
+     FOR UPDATE;
+    IF locked_id IS NULL THEN
+        RETURN FALSE;
+    END IF;
+    IF EXISTS (
+        SELECT 1 FROM "StudioExecution" execution
+         WHERE execution."workflowId" = "workflowId"
+           AND execution."status" IN ('queued', 'running', 'cancellation_requested')
+    ) THEN
+        RETURN FALSE;
+    END IF;
+    DELETE FROM "StudioWorkflow" workflow WHERE workflow."id" = "workflowId";
+    RETURN FOUND;
+END;
+$$;
+
 REVOKE ALL ON TABLE "StudioWorkflow", "StudioExecution", "StudioExecutionStage", "StudioCredential", "StudioAuditLog" FROM PUBLIC, anon, authenticated;
 GRANT ALL ON TABLE "StudioWorkflow", "StudioExecution", "StudioExecutionStage", "StudioCredential", "StudioAuditLog" TO service_role;
 
@@ -140,3 +165,5 @@ GRANT EXECUTE ON FUNCTION "finishStudioExecutionStage"(TEXT,INTEGER,TEXT,TEXT,JS
 GRANT EXECUTE ON FUNCTION "finishStudioGraphExecution"(TEXT,TEXT,TEXT,TEXT,TEXT,TIMESTAMP) TO service_role;
 GRANT EXECUTE ON FUNCTION "cancelStudioGraphExecution"(TEXT,TIMESTAMP) TO service_role;
 GRANT EXECUTE ON FUNCTION "deleteStudioWorkflowIfIdle"(TEXT) TO service_role;
+
+NOTIFY pgrst, 'reload schema';
