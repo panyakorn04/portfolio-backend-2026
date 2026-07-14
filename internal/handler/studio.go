@@ -259,9 +259,9 @@ func validateWorkflowDefinition(definition *model.StudioWorkflowDefinition, requ
 }
 
 var studioNodeConfigKeys = map[string]map[string]bool{
-	"schedule":    {"enabled": true, "mode": true, "timezone": true, "intervalMinutes": true, "time": true, "daysOfWeek": true, "cronExpression": true, "misfirePolicy": true},
-	"manual":      {"enabled": true},
-	"webhook":     {"enabled": true, "method": true, "authMode": true, "responseMode": true},
+	"schedule":     {"enabled": true, "mode": true, "timezone": true, "intervalMinutes": true, "time": true, "daysOfWeek": true, "cronExpression": true, "misfirePolicy": true},
+	"manual":       {"enabled": true},
+	"webhook":      {"enabled": true, "method": true, "authMode": true, "responseMode": true},
 	"http-request": {"method": true, "url": true, "headers": true, "body": true},
 }
 
