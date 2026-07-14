@@ -1,7 +1,7 @@
 package handler
 
 import (
-	"bytes"
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -644,6 +644,10 @@ func AdminExecuteStudioHttpRequestHandler(s *svc.ServiceContext) http.HandlerFun
 			response.Error(w, http.StatusConflict, "Save a structured workflow definition before executing a node.")
 			return
 		}
+		if _, message := validateWorkflowDefinition(workflow.Definition, true); message != "" {
+			response.Error(w, http.StatusConflict, "Save a valid and complete workflow definition before executing a node.")
+			return
+		}
 		var actionNode *model.StudioWorkflowNode
 		for index := range workflow.Definition.Nodes {
 			node := &workflow.Definition.Nodes[index]
@@ -663,55 +667,85 @@ func AdminExecuteStudioHttpRequestHandler(s *svc.ServiceContext) http.HandlerFun
 
 		config := actionNode.Config
 		method, _ := config["method"].(string)
-		url, _ := config["url"].(string)
-		if method == "" || url == "" {
-			response.Error(w, http.StatusBadRequest, "HTTP request method and URL are required.")
+		rawURL, _ := config["url"].(string)
+		validMethods := map[string]bool{"GET": true, "POST": true, "PUT": true, "PATCH": true, "DELETE": true}
+		if !validMethods[method] {
+			response.Error(w, http.StatusBadRequest, "HTTP request method must be GET, POST, PUT, PATCH, or DELETE.")
 			return
 		}
-
-		var requestBody io.Reader
-		if method != "GET" && method != "DELETE" {
-			if body, ok := config["body"].(string); ok && body != "" {
-				requestBody = bytes.NewBufferString(body)
-			}
-		}
-
-		req, err := http.NewRequestWithContext(r.Context(), method, url, requestBody)
+		parsedURL, err := validateStudioHTTPRequestURL(rawURL)
 		if err != nil {
-			response.Error(w, http.StatusBadRequest, "Invalid HTTP request: "+err.Error())
+			response.Error(w, http.StatusBadRequest, err.Error())
 			return
 		}
 
-		var headers map[string]string
-		switch h := config["headers"].(type) {
-		case map[string]any:
-			headers = make(map[string]string, len(h))
-			for k, v := range h {
-				headers[k] = fmt.Sprint(v)
+		body := ""
+		if rawBody, exists := config["body"]; exists {
+			var ok bool
+			body, ok = rawBody.(string)
+			if !ok {
+				response.Error(w, http.StatusBadRequest, "HTTP request body must be a string.")
+				return
 			}
-		case map[string]string:
-			headers = h
-		case string:
-			if h != "" {
-				if err := json.Unmarshal([]byte(h), &headers); err != nil {
-					response.Error(w, http.StatusBadRequest, "Invalid headers JSON: "+err.Error())
-					return
-				}
-			}
+		}
+		if err := validateStudioHTTPRequestBody(body); err != nil {
+			response.Error(w, http.StatusBadRequest, err.Error())
+			return
+		}
+		if (method == "GET" || method == "DELETE") && body != "" {
+			response.Error(w, http.StatusBadRequest, "GET and DELETE requests must not include a body.")
+			return
+		}
+		var requestBody io.Reader
+		if method != "GET" && method != "DELETE" && body != "" {
+			requestBody = strings.NewReader(body)
+		}
+
+		req, err := http.NewRequestWithContext(r.Context(), method, parsedURL.String(), requestBody)
+		if err != nil {
+			response.Error(w, http.StatusBadRequest, "Invalid HTTP request.")
+			return
+		}
+
+		headers, err := parseStudioHTTPHeaders(config["headers"])
+		if err != nil {
+			response.Error(w, http.StatusBadRequest, err.Error())
+			return
+		}
+		if err := validateStudioHTTPHeaders(headers); err != nil {
+			response.Error(w, http.StatusBadRequest, err.Error())
+			return
 		}
 		for k, v := range headers {
 			req.Header.Set(k, v)
 		}
 
-		client := &http.Client{Timeout: 30 * time.Second}
-		resp, err := client.Do(req)
+		resp, err := studioSafeHTTPClient.Do(req)
 		if err != nil {
-			response.Error(w, http.StatusBadGateway, "HTTP request failed: "+err.Error())
+			log.Printf("studio HTTP request failed workflow=%q node=%q host=%q error_type=%T", workflowID, nodeID, parsedURL.Hostname(), err)
+			switch {
+			case errors.Is(err, errStudioHTTPDestinationBlocked):
+				response.Error(w, http.StatusBadRequest, errStudioHTTPDestinationBlocked.Error())
+			case errors.Is(err, errStudioHTTPResolutionFailed):
+				response.Error(w, http.StatusBadGateway, errStudioHTTPResolutionFailed.Error())
+			case errors.Is(err, context.DeadlineExceeded):
+				response.Error(w, http.StatusGatewayTimeout, "HTTP request timed out.")
+			default:
+				response.Error(w, http.StatusBadGateway, "HTTP request failed.")
+			}
 			return
 		}
 		defer resp.Body.Close()
 
-		respBody, _ := io.ReadAll(resp.Body)
+		respBody, err := readStudioHTTPResponseBody(resp.Body)
+		if errors.Is(err, errStudioHTTPResponseTooLarge) {
+			response.Error(w, http.StatusBadGateway, err.Error())
+			return
+		}
+		if err != nil {
+			response.Error(w, http.StatusBadGateway, "Unable to read the HTTP response.")
+			return
+		}
 		executedAt := time.Now().UTC().Format(time.RFC3339Nano)
 
 		var parsedBody any
