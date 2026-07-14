@@ -92,6 +92,7 @@ func TestBlockedStudioOutboundIPRanges(t *testing.T) {
 		"2001:db8::1",
 		"2002::1",
 		"fc00::1",
+		"fec0::1",
 		"fe80::1",
 	} {
 		if !isBlockedStudioOutboundIP(net.ParseIP(raw)) {

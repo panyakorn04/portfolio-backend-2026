@@ -60,6 +60,7 @@ var (
 		netip.MustParsePrefix("3fff::/20"),
 		netip.MustParsePrefix("5f00::/16"),
 		netip.MustParsePrefix("fc00::/7"),
+		netip.MustParsePrefix("fec0::/10"),
 		netip.MustParsePrefix("fe80::/10"),
 		netip.MustParsePrefix("ff00::/8"),
 	}
