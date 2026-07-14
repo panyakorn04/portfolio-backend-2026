@@ -20,8 +20,9 @@ type Config struct {
 	ContactWebhookURL    string `json:",optional"`
 	ContactWebhookSecret string `json:",optional"`
 
-	AdminApiToken    string `json:",optional"`
-	InternalApiToken string `json:",optional"`
+	AdminApiToken                 string `json:",optional"`
+	InternalApiToken              string `json:",optional"`
+	StudioCredentialEncryptionKey string `json:",optional"`
 
 	AiProvider string `json:",optional"`
 	AiApiKey   string `json:",optional"`

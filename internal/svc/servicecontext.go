@@ -6,6 +6,7 @@ import (
 	"portfolio-backend/internal/cache"
 	"portfolio-backend/internal/config"
 	"portfolio-backend/internal/model"
+	"portfolio-backend/internal/security"
 )
 
 type ServiceContext struct {
@@ -14,21 +15,29 @@ type ServiceContext struct {
 	Supabase     *model.SupabaseREST
 	ArticleCache *cache.RedisCache
 
-	Users                 *model.UserModel
-	Sessions              *model.AuthSessionModel
-	Inquiries             *model.ContactInquiryModel
-	Articles              *model.ArticleModel
-	SupabaseArticles      *model.SupabaseArticleClient
-	PortfolioChatSessions *model.PortfolioChatSessionModel
-	PortfolioChatMessages *model.PortfolioChatMessageModel
-	Studio                *model.StudioModel
-	Ollama                *model.OllamaClient
-	AISkills              *model.AISkillProfileStore
-	HasDatabse            bool
+	Users                  *model.UserModel
+	Sessions               *model.AuthSessionModel
+	Inquiries              *model.ContactInquiryModel
+	Articles               *model.ArticleModel
+	SupabaseArticles       *model.SupabaseArticleClient
+	PortfolioChatSessions  *model.PortfolioChatSessionModel
+	PortfolioChatMessages  *model.PortfolioChatMessageModel
+	Studio                 *model.StudioModel
+	StudioCredentialCipher *security.CredentialCipher
+	Ollama                 *model.OllamaClient
+	AISkills               *model.AISkillProfileStore
+	HasDatabse             bool
 }
 
 func NewServiceContext(c config.Config) (*ServiceContext, error) {
 	svc := &ServiceContext{Config: c}
+	if c.StudioCredentialEncryptionKey != "" {
+		credentialCipher, err := security.NewCredentialCipher(c.StudioCredentialEncryptionKey)
+		if err != nil {
+			return nil, err
+		}
+		svc.StudioCredentialCipher = credentialCipher
+	}
 
 	key := c.SupabaseServiceRoleKey
 	if key == "" {

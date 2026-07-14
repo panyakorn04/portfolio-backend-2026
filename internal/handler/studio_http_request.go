@@ -177,11 +177,19 @@ func newStudioSafeDialContext(resolver studioHostResolver, dial studioDialContex
 }
 
 func newStudioSafeHTTPClient() *http.Client {
+	return newStudioSafeHTTPClientWithOptions(defaultStudioHTTPRequestOptions())
+}
+
+func newStudioSafeHTTPClientWithOptions(options studioHTTPRequestOptions) *http.Client {
 	dialer := &net.Dialer{Timeout: 10 * time.Second, KeepAlive: 30 * time.Second}
-	return newStudioSafeHTTPClientWithNetwork(net.DefaultResolver, dialer.DialContext)
+	return newStudioSafeHTTPClientWithNetworkOptions(net.DefaultResolver, dialer.DialContext, options)
 }
 
 func newStudioSafeHTTPClientWithNetwork(resolver studioHostResolver, dial studioDialContextFunc) *http.Client {
+	return newStudioSafeHTTPClientWithNetworkOptions(resolver, dial, defaultStudioHTTPRequestOptions())
+}
+
+func newStudioSafeHTTPClientWithNetworkOptions(resolver studioHostResolver, dial studioDialContextFunc, options studioHTTPRequestOptions) *http.Client {
 	transport := http.DefaultTransport.(*http.Transport).Clone()
 	transport.Proxy = nil
 	transport.DialContext = newStudioSafeDialContext(resolver, dial)
@@ -193,9 +201,12 @@ func newStudioSafeHTTPClientWithNetwork(resolver studioHostResolver, dial studio
 	transport.TLSHandshakeTimeout = 10 * time.Second
 	return &http.Client{
 		Transport: transport,
-		Timeout:   30 * time.Second,
+		Timeout:   time.Duration(options.TimeoutMS) * time.Millisecond,
 		CheckRedirect: func(req *http.Request, via []*http.Request) error {
-			if len(via) >= maxStudioHTTPRedirects {
+			if !options.FollowRedirects || options.MaxRedirects == 0 {
+				return http.ErrUseLastResponse
+			}
+			if len(via) > options.MaxRedirects {
 				return errors.New("HTTP request exceeded the redirect limit")
 			}
 			if len(via) > 0 {
@@ -244,6 +255,14 @@ func parseStudioHTTPHeaders(value any) (map[string]string, error) {
 }
 
 func validateStudioHTTPHeaders(headers map[string]string) error {
+	return validateStudioHTTPHeadersWithSecrets(headers, false)
+}
+
+func validateStudioCredentialHeaders(headers map[string]string) error {
+	return validateStudioHTTPHeadersWithSecrets(headers, true)
+}
+
+func validateStudioHTTPHeadersWithSecrets(headers map[string]string, allowSensitive bool) error {
 	if len(headers) > maxStudioHTTPHeaderCount {
 		return fmt.Errorf("HTTP request headers must not exceed %d entries", maxStudioHTTPHeaderCount)
 	}
@@ -261,12 +280,26 @@ func validateStudioHTTPHeaders(headers map[string]string) error {
 		"transfer-encoding":   true,
 		"upgrade":             true,
 	}
+	sensitive := map[string]bool{
+		"api-key":        true,
+		"api-token":      true,
+		"authorization":  true,
+		"cookie":         true,
+		"set-cookie":     true,
+		"x-access-token": true,
+		"x-api-key":      true,
+		"x-api-token":    true,
+		"x-auth":         true,
+		"x-auth-token":   true,
+		"x-secret":       true,
+		"x-token":        true,
+	}
 	seen := make(map[string]bool, len(headers))
 	totalBytes := 0
 	for name, value := range headers {
 		canonical := textproto.CanonicalMIMEHeaderKey(name)
 		lowerName := strings.ToLower(canonical)
-		if canonical == "" || len(name) > maxStudioHTTPHeaderNameBytes || blocked[lowerName] || strings.HasPrefix(lowerName, "x-forwarded-") {
+		if canonical == "" || len(name) > maxStudioHTTPHeaderNameBytes || blocked[lowerName] || (!allowSensitive && sensitive[lowerName]) || strings.HasPrefix(lowerName, "x-forwarded-") {
 			return fmt.Errorf("HTTP request header %q is not allowed", name)
 		}
 		if seen[lowerName] {
@@ -289,6 +322,24 @@ func validateStudioHTTPRequestBody(body string) error {
 		return fmt.Errorf("HTTP request body must not exceed %d bytes", maxStudioHTTPRequestBodyBytes)
 	}
 	return nil
+}
+
+func filterStudioHTTPResponseHeaders(headers http.Header) http.Header {
+	filtered := make(http.Header, len(headers))
+	blocked := map[string]bool{
+		"authentication-info":       true,
+		"proxy-authenticate":        true,
+		"proxy-authentication-info": true,
+		"set-cookie":                true,
+		"www-authenticate":          true,
+	}
+	for name, values := range headers {
+		if blocked[strings.ToLower(name)] {
+			continue
+		}
+		filtered[name] = append([]string(nil), values...)
+	}
+	return filtered
 }
 
 func readStudioHTTPResponseBody(reader io.Reader) ([]byte, error) {

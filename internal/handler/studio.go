@@ -262,7 +262,7 @@ var studioNodeConfigKeys = map[string]map[string]bool{
 	"schedule":     {"enabled": true, "mode": true, "timezone": true, "intervalMinutes": true, "time": true, "daysOfWeek": true, "cronExpression": true, "misfirePolicy": true},
 	"manual":       {"enabled": true},
 	"webhook":      {"enabled": true, "method": true, "authMode": true, "responseMode": true},
-	"http-request": {"method": true, "url": true, "headers": true, "body": true},
+	"http-request": {"method": true, "url": true, "headers": true, "body": true, "queryParameters": true, "authMode": true, "credentialId": true, "options": true},
 }
 
 func validateNodeConfig(node model.StudioWorkflowNode, requireComplete bool) string {
@@ -298,15 +298,14 @@ func validateNodeConfig(node model.StudioWorkflowNode, requireComplete bool) str
 			return "Webhook configuration is invalid for definition version 1."
 		}
 	}
-	if node.Type == "http-request" && requireComplete {
-		method, methodOK := node.Config["method"].(string)
-		url, urlOK := node.Config["url"].(string)
-		if !methodOK || !urlOK || url == "" {
-			return "HTTP Request requires a method and a non-empty URL."
+	if node.Type == "http-request" {
+		if err := validateStudioHTTPRequestSecretFreeConfig(node.Config); err != nil {
+			return err.Error()
 		}
-		validMethods := map[string]bool{"GET": true, "POST": true, "PUT": true, "PATCH": true, "DELETE": true}
-		if !validMethods[method] {
-			return "HTTP Request method must be GET, POST, PUT, PATCH, or DELETE."
+		if requireComplete {
+			if _, err := parseStudioHTTPRequestConfig(node.Config); err != nil {
+				return err.Error()
+			}
 		}
 	}
 	return ""
@@ -665,62 +664,62 @@ func AdminExecuteStudioHttpRequestHandler(s *svc.ServiceContext) http.HandlerFun
 			return
 		}
 
-		config := actionNode.Config
-		method, _ := config["method"].(string)
-		rawURL, _ := config["url"].(string)
-		validMethods := map[string]bool{"GET": true, "POST": true, "PUT": true, "PATCH": true, "DELETE": true}
-		if !validMethods[method] {
-			response.Error(w, http.StatusBadRequest, "HTTP request method must be GET, POST, PUT, PATCH, or DELETE.")
-			return
-		}
-		parsedURL, err := validateStudioHTTPRequestURL(rawURL)
+		requestConfig, err := parseStudioHTTPRequestConfig(actionNode.Config)
 		if err != nil {
 			response.Error(w, http.StatusBadRequest, err.Error())
 			return
 		}
-
-		body := ""
-		if rawBody, exists := config["body"]; exists {
-			var ok bool
-			body, ok = rawBody.(string)
-			if !ok {
-				response.Error(w, http.StatusBadRequest, "HTTP request body must be a string.")
-				return
-			}
-		}
-		if err := validateStudioHTTPRequestBody(body); err != nil {
+		parsedURL, err := validateStudioHTTPRequestURL(requestConfig.URL)
+		if err != nil {
 			response.Error(w, http.StatusBadRequest, err.Error())
 			return
 		}
-		if (method == "GET" || method == "DELETE") && body != "" {
-			response.Error(w, http.StatusBadRequest, "GET and DELETE requests must not include a body.")
-			return
-		}
-		var requestBody io.Reader
-		if method != "GET" && method != "DELETE" && body != "" {
-			requestBody = strings.NewReader(body)
-		}
+		appendStudioQueryParameters(parsedURL, requestConfig.QueryParameters)
 
-		req, err := http.NewRequestWithContext(r.Context(), method, parsedURL.String(), requestBody)
+		var requestBody io.Reader
+		if requestConfig.Body != "" {
+			requestBody = strings.NewReader(requestConfig.Body)
+		}
+		req, err := http.NewRequestWithContext(r.Context(), requestConfig.Method, parsedURL.String(), requestBody)
 		if err != nil {
 			response.Error(w, http.StatusBadRequest, "Invalid HTTP request.")
 			return
 		}
-
-		headers, err := parseStudioHTTPHeaders(config["headers"])
-		if err != nil {
-			response.Error(w, http.StatusBadRequest, err.Error())
-			return
-		}
-		if err := validateStudioHTTPHeaders(headers); err != nil {
-			response.Error(w, http.StatusBadRequest, err.Error())
-			return
-		}
-		for k, v := range headers {
-			req.Header.Set(k, v)
+		for name, value := range requestConfig.Headers {
+			req.Header.Set(name, value)
 		}
 
-		resp, err := studioSafeHTTPClient.Do(req)
+		if requestConfig.AuthMode == "credential" {
+			if !requireStudioCredentialCipher(w, s) {
+				return
+			}
+			record, findErr := s.Studio.FindCredential(r.Context(), requestConfig.CredentialID)
+			if findErr != nil {
+				response.Error(w, http.StatusInternalServerError, "Unable to load HTTP request credential.")
+				return
+			}
+			if record == nil {
+				response.Error(w, http.StatusConflict, "The selected HTTP request credential was not found.")
+				return
+			}
+			data, decryptErr := s.StudioCredentialCipher.DecryptFor(studioCredentialCipherScope(record.ID, record.Type), record.EncryptedData)
+			if decryptErr != nil {
+				response.Error(w, http.StatusConflict, "The selected HTTP request credential could not be decrypted.")
+				return
+			}
+			if err := applyStudioCredential(req, &studioResolvedCredential{Type: record.Type, Data: data}); err != nil {
+				response.Error(w, http.StatusConflict, "The selected HTTP request credential is invalid.")
+				return
+			}
+		}
+
+		httpClient := studioSafeHTTPClient
+		if requestConfig.Options != defaultStudioHTTPRequestOptions() {
+			customClient := newStudioSafeHTTPClientWithOptions(requestConfig.Options)
+			defer customClient.CloseIdleConnections()
+			httpClient = customClient
+		}
+		resp, err := httpClient.Do(req)
 		if err != nil {
 			log.Printf("studio HTTP request failed workflow=%q node=%q host=%q error_type=%T", workflowID, nodeID, parsedURL.Hostname(), err)
 			switch {
@@ -746,27 +745,38 @@ func AdminExecuteStudioHttpRequestHandler(s *svc.ServiceContext) http.HandlerFun
 			response.Error(w, http.StatusBadGateway, "Unable to read the HTTP response.")
 			return
 		}
-		executedAt := time.Now().UTC().Format(time.RFC3339Nano)
+		if !requestConfig.Options.IgnoreHTTPStatusErrors && resp.StatusCode >= http.StatusBadRequest {
+			response.Error(w, http.StatusBadGateway, "HTTP request returned an error status.")
+			return
+		}
 
 		var parsedBody any
-		if contentType := resp.Header.Get("Content-Type"); len(contentType) > 0 {
+		switch requestConfig.Options.ResponseFormat {
+		case "text":
+			parsedBody = string(respBody)
+		case "json":
+			if err := json.Unmarshal(respBody, &parsedBody); err != nil {
+				response.Error(w, http.StatusBadGateway, "HTTP response was not valid JSON.")
+				return
+			}
+		default:
 			if err := json.Unmarshal(respBody, &parsedBody); err != nil {
 				parsedBody = string(respBody)
 			}
-		} else {
-			parsedBody = string(respBody)
 		}
 
+		outputJSON := map[string]any{
+			"statusCode": resp.StatusCode,
+			"status":     resp.Status,
+			"body":       parsedBody,
+		}
+		if requestConfig.Options.IncludeResponseHeaders {
+			outputJSON["headers"] = filterStudioHTTPResponseHeaders(resp.Header)
+		}
+		executedAt := time.Now().UTC().Format(time.RFC3339Nano)
 		item := studioTriggerOutput{
 			NodeID: nodeID, NodeType: "http-request", ExecutedAt: executedAt,
-			Output: []map[string]map[string]any{{
-				"json": {
-					"statusCode": resp.StatusCode,
-					"status":     resp.Status,
-					"headers":    resp.Header,
-					"body":       parsedBody,
-				},
-			}},
+			Output: []map[string]map[string]any{{"json": outputJSON}},
 		}
 
 		if _, err := s.Studio.CreateAudit(r.Context(), studioAuditInput(r, s, access, "node.execute", "workflow-node", nodeID, "", "completed")); err != nil {

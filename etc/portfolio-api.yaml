@@ -32,9 +32,10 @@ TrustProxy: false
 ContactWebhookURL: ${CONTACT_WEBHOOK_URL}
 ContactWebhookSecret: ${CONTACT_WEBHOOK_SECRET}
 
-# Static bearer tokens (optional).
+# Static bearer tokens and Studio credential encryption (optional).
 AdminApiToken: ${ADMIN_API_TOKEN}
 InternalApiToken: ${INTERNAL_API_TOKEN}
+StudioCredentialEncryptionKey: ${STUDIO_CREDENTIAL_ENCRYPTION_KEY}
 
 # AI provider config (optional).
 AiProvider: ${AI_PROVIDER}

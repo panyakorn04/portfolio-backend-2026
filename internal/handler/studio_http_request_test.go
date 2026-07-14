@@ -194,6 +194,20 @@ func TestSafeStudioDialFailsClosedForMixedDNSAnswers(t *testing.T) {
 	}
 }
 
+func TestFilterStudioHTTPResponseHeadersRedactsAuthenticationMaterial(t *testing.T) {
+	t.Parallel()
+
+	headers := http.Header{
+		"Content-Type":     {"application/json"},
+		"Set-Cookie":       {"session=secret"},
+		"WWW-Authenticate": {"Bearer realm=secret"},
+	}
+	filtered := filterStudioHTTPResponseHeaders(headers)
+	if filtered.Get("Content-Type") != "application/json" || filtered.Get("Set-Cookie") != "" || filtered.Get("WWW-Authenticate") != "" {
+		t.Fatalf("unexpected filtered headers: %#v", filtered)
+	}
+}
+
 func TestReadStudioHTTPResponseBodyIsBounded(t *testing.T) {
 	t.Parallel()
 
@@ -215,10 +229,10 @@ func TestReadStudioHTTPResponseBodyIsBounded(t *testing.T) {
 func TestValidateStudioHTTPHeaders(t *testing.T) {
 	t.Parallel()
 
-	if err := validateStudioHTTPHeaders(map[string]string{"Accept": "application/json", "X-API-Key": "value"}); err != nil {
+	if err := validateStudioHTTPHeaders(map[string]string{"Accept": "application/json", "X-Client-Version": "value"}); err != nil {
 		t.Fatalf("safe headers rejected: %v", err)
 	}
-	for _, name := range []string{"Host", "Connection", "Content-Length", "Expect", "Keep-Alive", "Proxy-Authorization", "Transfer-Encoding", "X-Forwarded-For"} {
+	for _, name := range []string{"Host", "Connection", "Content-Length", "Expect", "Keep-Alive", "Proxy-Authorization", "Transfer-Encoding", "X-Forwarded-For", "Authorization", "Cookie", "X-API-Key"} {
 		if err := validateStudioHTTPHeaders(map[string]string{name: "unsafe"}); err == nil {
 			t.Fatalf("expected %s to be rejected", name)
 		}
@@ -258,7 +272,14 @@ func TestStudioHTTPRequestBodyAndRedirectLimits(t *testing.T) {
 		t.Fatal("redirect to a private destination must be rejected")
 	}
 	publicRedirect := httptest.NewRequest(http.MethodGet, "https://example.com/data", nil)
-	if err := client.CheckRedirect(publicRedirect, make([]*http.Request, maxStudioHTTPRedirects)); err == nil {
+	allowedVia := make([]*http.Request, maxStudioHTTPRedirects)
+	for index := range allowedVia {
+		allowedVia[index] = httptest.NewRequest(http.MethodGet, "https://example.com/start", nil)
+	}
+	if err := client.CheckRedirect(publicRedirect, allowedVia); err != nil {
+		t.Fatalf("redirect chain at configured limit was rejected: %v", err)
+	}
+	if err := client.CheckRedirect(publicRedirect, append(allowedVia, httptest.NewRequest(http.MethodGet, "https://example.com/start", nil))); err == nil {
 		t.Fatal("redirect chain beyond the limit must be rejected")
 	}
 	original := httptest.NewRequest(http.MethodGet, "https://example.com/start", nil)
@@ -275,7 +296,7 @@ func TestStudioHTTPRequestBodyAndRedirectLimits(t *testing.T) {
 func TestAdminExecuteStudioHTTPRequestSanitizesTransportErrors(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
-		_, _ = w.Write([]byte(`[{"id":"wf-2","name":"Public Request","description":"Demo","category":"Ops","status":"draft","runs":0,"success":0,"nodes":["Manual","HTTP Request"],"definition":{"version":1,"nodes":[{"id":"manual","type":"manual","kind":"trigger","label":"Manual","position":{"x":0,"y":0},"config":{"enabled":true}},{"id":"request","type":"http-request","kind":"action","label":"HTTP Request","position":{"x":200,"y":0},"config":{"method":"GET","url":"https://example.com/data?token=must-not-leak","headers":{},"body":""}}],"edges":[{"id":"edge-manual-request","source":"manual","target":"request"}]},"createdAt":"2026-01-01T00:00:00Z","updatedAt":"2026-01-01T00:00:00Z"}]`))
+		_, _ = w.Write([]byte(`[{"id":"wf-2","name":"Public Request","description":"Demo","category":"Ops","status":"draft","runs":0,"success":0,"nodes":["Manual","HTTP Request"],"definition":{"version":1,"nodes":[{"id":"manual","type":"manual","kind":"trigger","label":"Manual","position":{"x":0,"y":0},"config":{"enabled":true}},{"id":"request","type":"http-request","kind":"action","label":"HTTP Request","position":{"x":200,"y":0},"config":{"method":"GET","url":"https://example.com/data?marker=must-not-leak","headers":{},"body":""}}],"edges":[{"id":"edge-manual-request","source":"manual","target":"request"}]},"createdAt":"2026-01-01T00:00:00Z","updatedAt":"2026-01-01T00:00:00Z"}]`))
 	}))
 	defer server.Close()
 
