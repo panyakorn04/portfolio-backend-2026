@@ -32,14 +32,14 @@ type adminChatMessageDTO struct {
 }
 
 type adminChatSessionDetailDTO struct {
-	ID        string                 `json:"id"`
-	ThreadID  string                 `json:"threadId"`
-	Locale    string                 `json:"locale"`
-	Title     *string                `json:"title"`
-	Status    string                 `json:"status"`
-	CreatedAt time.Time              `json:"createdAt"`
-	UpdatedAt time.Time              `json:"updatedAt"`
-	Messages  []adminChatMessageDTO  `json:"messages"`
+	ID        string                `json:"id"`
+	ThreadID  string                `json:"threadId"`
+	Locale    string                `json:"locale"`
+	Title     *string               `json:"title"`
+	Status    string                `json:"status"`
+	CreatedAt time.Time             `json:"createdAt"`
+	UpdatedAt time.Time             `json:"updatedAt"`
+	Messages  []adminChatMessageDTO `json:"messages"`
 }
 
 type adminChatReplyRequest struct {

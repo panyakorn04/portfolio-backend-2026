@@ -19,7 +19,9 @@ func SwaggerDocHandler(svcCtx *svc.ServiceContext) http.HandlerFunc {
 		}
 		w.Header().Set("Content-Type", "application/json")
 		w.Header().Set("Access-Control-Allow-Origin", "*")
-		w.Write(data)
+		if _, err := w.Write(data); err != nil {
+			return
+		}
 	}
 }
 
@@ -31,7 +33,9 @@ func SwaggerUIHandler(svcCtx *svc.ServiceContext) http.HandlerFunc {
 			return
 		}
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
-		w.Write(data)
+		if _, err := w.Write(data); err != nil {
+			return
+		}
 	}
 }
 

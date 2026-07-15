@@ -155,7 +155,9 @@ func PortfolioAssistantRequestHumanHandler(svcCtx *svc.ServiceContext) http.Hand
 			return
 		}
 
-		svcCtx.PortfolioChatMessages.Append(r.Context(), sessionID, "system", "request_human", "Visitor requested human contact", map[string]any{"source": "portfolio-widget"})
+		if _, err := svcCtx.PortfolioChatMessages.Append(r.Context(), sessionID, "system", "request_human", "Visitor requested human contact", map[string]any{"source": "portfolio-widget"}); err != nil {
+			log.Printf("portfolio chat request human append message error: %v", err)
+		}
 
 		response.Ok(w, http.StatusOK, map[string]any{"status": "pending_human"})
 	}

@@ -1,463 +1,454 @@
-# Portfolio Backend (go-zero)
+# Portfolio Backend 2026
 
-REST API for the portfolio site, ported from the Next.js server layer to
-[go-zero](https://go-zero.dev). The frontend (Next.js) lives in a separate repo
-and calls this service over HTTP.
+[![CI/CD](https://github.com/panyakorn04/portfolio-backend-2026/actions/workflows/ci.yml/badge.svg)](https://github.com/panyakorn04/portfolio-backend-2026/actions/workflows/ci.yml)
 
-## Tech stack
+Production Go API for Panyakorn Boonyong's portfolio ecosystem. It serves the public portfolio, administration workspace, AI assistant, anonymous chat persistence, and AI Workflow Studio from one go-zero REST service.
 
-- Go 1.23
-- go-zero `rest` (HTTP API, no zRPC)
-- Supabase REST/PostgREST for all persistence
-- Optional Redis cache for public article GET responses
-- bcrypt password hashing, SHA-256 session-token hashing
+Backend API สำหรับระบบ Portfolio ของ Panyakorn Boonyong ครอบคลุมบทความและแบบฟอร์มติดต่อ ระบบหลังบ้าน AI assistant การเก็บประวัติแชตแบบ anonymous และ workflow runtime ของ AI Workflow Studio โดยใช้ Supabase REST/PostgREST เป็น persistence layer หลัก
 
-## Layout
+## Live services
+
+| Service | URL |
+| --- | --- |
+| API | [api.panyakorn.com](https://api.panyakorn.com/api/health) |
+| Swagger UI | [api.panyakorn.com/swagger](https://api.panyakorn.com/swagger) |
+| Swagger 2.0 document | [api.panyakorn.com/swagger/doc.json](https://api.panyakorn.com/swagger/doc.json) |
+| Portfolio frontend | [panyakorn.com](https://panyakorn.com) |
+
+## What is included
+
+### Portfolio platform
+
+- Public health, contact, and localized article endpoints
+- Contact inquiry persistence with an optional signed outbound webhook
+- Admin session login/logout, session revocation, users, articles, and inquiries
+- Anonymous portfolio chat sessions backed by Supabase
+- Visitor-owned session lookup, session deletion, latest-session recovery, and human-handoff requests
+- Persisted admin chat inbox with replies and status transitions
+- Redis-backed public article caching with mutation invalidation
+
+### AI adapter
+
+- JSON and SSE chat endpoints backed by internal Ollama
+- Public portfolio-assistant profile loaded from `AI_SKILLS_DIR`
+- Pinned AI-console guardrail profile
+- Server-side allowlist for selectable public chat models
+- Admin-only Ollama model, runtime, version, model-detail, and embedding endpoints
+- Public chat request limits and bounded payload/history handling
+- Ollama remains internal; port `11434` must not be published directly
+
+### AI Workflow Studio runtime
+
+- Public workflow/execution overview and execution-stage projections
+- Authenticated workflow CRUD with versioned graph definitions
+- Manual, Schedule, and signed Webhook triggers
+- Durable Supabase-backed execution queue with worker leases
+- Persisted stage input/output, retry, cancellation, and audit logs
+- SSE execution snapshots with polling, heartbeat, and bounded lifetime
+- HTTP Request action nodes with SSRF/resource-limit hardening
+- Secret-safe cURL import
+- AES-256-GCM encrypted Studio credentials with scope-bound authenticated data
+- Individually signed webhook capabilities
+- Redis-backed mutation/login rate limiting with in-memory fallback
+
+## Architecture
+
+```text
+portfolio-2026              ai-workflow-studio             open-webui-theme
+     │                               │                            │
+     └────────────── HTTPS /api/* ───┴────────────────────────────┘
+                                     │
+                                     ▼
+                         portfolio-backend-2026
+                         Go 1.23 + go-zero REST
+                          │         │          │
+                          │         │          └── Ollama
+                          │         │              local models
+                          │         │
+                          │         └── Redis
+                          │             cache + rate limits
+                          │
+                          └── Supabase REST/PostgREST
+                              data + RPC-backed workflow queue
+```
+
+The service does not open a direct PostgreSQL connection. All runtime persistence goes through Supabase REST/PostgREST and database RPCs defined by the ordered SQL migrations.
+
+## Technology
+
+| Layer | Technology |
+| --- | --- |
+| Language | Go 1.23 |
+| HTTP framework | go-zero `rest` |
+| Persistence | Supabase REST/PostgREST |
+| Cache and distributed limits | Redis 7 via `go-redis/v9` |
+| AI runtime | Ollama HTTP API |
+| Authentication | bcrypt, legacy scrypt compatibility, SHA-256 session-token hashes, bearer tokens |
+| Credential encryption | AES-256-GCM with scope-bound AAD |
+| API documentation | `portfolio.api`, committed partial `swagger.json`, and hosted Swagger UI |
+| Container | Multi-stage Alpine image, static binary, non-root runtime user |
+| Delivery | GitHub Actions, GHCR immutable SHA images, Docker Compose, Caddy |
+
+## Repository structure
 
 ```text
 .
-├── etc/portfolio-api.yaml     # config (reads ${ENV} placeholders)
-├── portfolio.api              # go-zero API spec (reference for goctl)
-├── migrations/                # additive Supabase schema migrations (apply in numeric order)
-├── cmd/createuser/            # CLI to create/update a staff user via Supabase REST
+├── main.go                         # service bootstrap and Studio worker
+├── portfolio.api                   # go-zero API contract/reference
+├── swagger.json                    # hosted API document
+├── swagger.html                    # hosted Swagger UI shell
+├── etc/portfolio-api.yaml          # go-zero runtime configuration
+├── cmd/createuser/                 # staff-user create/update CLI
+├── deploy/
+│   ├── README.md                   # production deployment contract
+│   └── deploy-compose-service.sh   # lock, deploy, health gate, rollback
 ├── internal/
-│   ├── config/                # config struct
-│   ├── svc/                   # service context (Supabase REST clients)
-│   ├── model/                 # Supabase REST data access
-│   ├── auth/                  # bcrypt, sessions, bearer, RBAC
-│   ├── logic/                 # business logic (validation, webhook, ai, jobs)
-│   ├── response/              # { ok, data } / { ok, error } envelopes
-│   └── handler/               # HTTP handlers + routes
-└── main.go
+│   ├── auth/                       # sessions, bearer auth, password verification, RBAC
+│   ├── cache/                      # Redis article cache and counters
+│   ├── config/                     # typed go-zero config
+│   ├── handler/                    # routes, HTTP handlers, Studio runtime and SSE
+│   ├── logic/                      # articles, contact, webhook, and job logic
+│   ├── model/                      # Supabase REST models, Ollama, skill profiles
+│   ├── response/                   # shared JSON response envelopes
+│   ├── security/                   # Studio credential cipher
+│   └── svc/                        # service context and dependencies
+├── migrations/                    # additive Supabase SQL, apply in numeric order
+├── .github/workflows/
+│   ├── ci.yml                      # validate, lint, image, deploy, rollback
+│   └── pull-ollama-model.yml       # manual model installation on the VPS
+├── Dockerfile
+├── docker-compose.yml              # local API + Redis development stack
+└── Makefile
 ```
+
+The repository also contains project-specific agent skills under `.agents/skills/`; they are development guidance and are not part of the runtime image contract.
 
 ## Prerequisites
 
-```bash
-# Go toolchain
-brew install go            # or download from https://go.dev/dl
+- Go 1.23+
+- A Supabase project
+- Docker and Docker Compose for container-based development
+- Redis is optional for direct local runs and included by the local Compose stack
+- Ollama is optional unless exercising AI endpoints
+- `goctl` is optional and only needed for scaffolding from `portfolio.api`
 
-# Optional: goctl, only needed to regenerate from portfolio.api
+```bash
+brew install go
+
+# Optional
 go install github.com/zeromicro/go-zero/tools/goctl@latest
-export PATH=$PATH:$(go env GOPATH)/bin
+export PATH="$PATH:$(go env GOPATH)/bin"
 ```
 
-## Setup
+## Local setup
+
+```bash
+git clone https://github.com/panyakorn04/portfolio-backend-2026.git
+cd portfolio-backend-2026
+cp .env.example .env
+```
+
+Set your Supabase URL and keys in `.env`, then create or update an admin user:
+
+```bash
+set -a
+source .env
+set +a
+
+go run ./cmd/createuser \
+  -email you@example.com \
+  -password 'replace-this-password' \
+  -role admin \
+  -name 'Your Name'
+```
+
+Run the API:
+
+```bash
+make dev
+# http://localhost:8888
+# http://localhost:8888/swagger
+```
+
+Equivalent direct command:
+
+```bash
+set -a; source .env; set +a
+go run . -f etc/portfolio-api.yaml
+```
+
+## Environment contract
+
+Never commit `.env` or production credentials. `.env.example` contains names and safe development defaults only.
+
+### Persistence and site
+
+| Variable | Purpose |
+| --- | --- |
+| `NEXT_PUBLIC_SUPABASE_URL` | Supabase project URL |
+| `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY` | Publishable REST key; development/read fallback |
+| `SUPABASE_SERVICE_ROLE_KEY` | Backend-only key for writes, sessions, admin, chat, and Studio operations |
+| `NEXT_PUBLIC_SITE_URL` | Public portfolio origin and secure-cookie decision |
+| `REDIS_URL` | Optional Redis connection; empty disables cache/distributed limits |
+| `ARTICLE_CACHE_TTL_SECONDS` | Public article cache TTL; defaults to 300 seconds |
+
+Production should always provide `SUPABASE_SERVICE_ROLE_KEY`. The service can initialize with the publishable key when the service-role key is empty, but privileged writes may fail under RLS and that fallback is not a production configuration.
+
+### Authentication, Studio, and contact
+
+| Variable | Purpose |
+| --- | --- |
+| `ADMIN_API_TOKEN` | Optional static admin bearer token; bypasses session RBAC |
+| `INTERNAL_API_TOKEN` | Bearer token for internal job endpoints |
+| `STUDIO_CREDENTIAL_ENCRYPTION_KEY` | Base64-encoded 32-byte key for Studio credential encryption |
+| `STUDIO_WEBHOOK_SIGNING_KEY` | Independent HMAC key for Studio webhook capabilities |
+| `CONTACT_WEBHOOK_URL` | Optional destination for contact-submission notifications |
+| `CONTACT_WEBHOOK_SECRET` | Optional signing secret for the contact webhook |
+
+Generate independent keys; do not reuse bearer tokens:
+
+```bash
+openssl rand -base64 32  # STUDIO_CREDENTIAL_ENCRYPTION_KEY
+openssl rand -base64 48  # STUDIO_WEBHOOK_SIGNING_KEY or visitor secret
+```
+
+### AI and portfolio chat
+
+| Variable | Purpose |
+| --- | --- |
+| `AI_PROVIDER` | Provider mode; defaults to `stub` in `.env.example` |
+| `AI_API_KEY` | Optional provider credential |
+| `OLLAMA_BASE_URL` | Internal Ollama API URL |
+| `OLLAMA_MODEL` | Default Ollama model |
+| `OLLAMA_ALLOWED_MODELS` | Comma-separated public chat model allowlist; defaults to the pinned model when empty |
+| `AI_SKILLS_DIR` | Root directory for mounted AI skill profiles |
+| `PORTFOLIO_CHAT_VISITOR_SECRET` | HMAC key used before visitor identifiers reach the database |
+| `PORTFOLIO_CHAT_SESSION_TTL_HOURS` | Intended anonymous-session lifetime; production default is 2160 hours |
+| `PORTFOLIO_CHAT_MAX_STORED_MESSAGES` | Intended per-session history cap; production default is 100 |
+
+The two portfolio-chat numeric defaults are currently set in `etc/portfolio-api.yaml`. If you change their environment values, keep the runtime config mapping synchronized.
+
+## Docker development
+
+The local Compose file starts the API and Redis. It does not start PostgreSQL; persistence still uses the configured Supabase project.
 
 ```bash
 cp .env.example .env
-# edit .env with your Supabase URL and keys
-
-go mod tidy
-
-# Apply migrations in numeric order through 0015_portfolio_chat_admin.sql.
-
-# Create/update an editor or viewer user through Supabase REST
-# (admin roles must be created directly via Supabase dashboard)
-set -a; source .env; set +a
-go run ./cmd/createuser \
-  -email you@example.com -password 'change-me' -role editor -name "You"
-```
-
-Required Supabase env:
-
-- `NEXT_PUBLIC_SUPABASE_URL`
-- `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY`
-- `SUPABASE_SERVICE_ROLE_KEY` for backend/admin writes. The backend falls back to
-  the publishable key when the service role key is empty, but production should
-  provide the service role key from server-side secrets only.
-
-Optional Redis article cache and distributed rate-limit env:
-
-- `REDIS_URL`, for example `redis://localhost:6379/0`. Leave empty to disable.
-- `ARTICLE_CACHE_TTL_SECONDS`, defaults to 300 seconds when unset or invalid.
-- Set `TrustProxy: true` only behind a trusted proxy that overwrites
-  `X-Forwarded-For`/`X-Real-IP`; otherwise rate limits use the direct peer IP.
-
-## Studio persistence and API
-
-`migrations/0003_studio.sql` adds `StudioWorkflow` and `StudioExecution`.
-`migrations/0005_studio_audit_log.sql` adds the append-only `StudioAuditLog`.
-`migrations/0006_studio_execution_create_audit.sql` additively permits the
-`execution.create` audit action without modifying an applied migration.
-`migrations/0007_studio_execution_stages.sql` adds ordered, execution-specific
-stages and idempotently seeds existing runs from their workflow nodes.
-`migrations/0008_studio_workflow_definition.sql` adds the private typed workflow
-graph definition. `migrations/0009_studio_credentials.sql` adds encrypted HTTP
-credential storage and the matching audit allowlist. `migrations/0010_studio_graph_execution.sql`
-adds the database-backed execution queue, worker leases, cancellation/idempotency
-RPCs, persisted node input/output, and workflow-history cascade cleanup.
-`migrations/0011_studio_execution_security.sql` revokes direct browser roles from
-private Studio tables/RPCs and hardens cancellation, lease, and crash recovery.
-`migrations/0012_studio_schedule_webhook_security.sql` fixes replay idempotency for
-schedule and webhook execution sources. `migrations/0013_studio_stage_ownership_security.sql`
-locks live execution ownership before completing a stage and revokes the legacy
-execution-creation RPC from browser roles. `migrations/0014_studio_execution_rpc_ambiguity.sql`
-uses local aliases in every lifecycle RPC to prevent PL/pgSQL parameter/column
-ambiguity during stage start, finalization, cancellation, and cleanup.
-`migrations/0015_portfolio_chat_admin.sql` additively adds `status` to
-`PortfolioChatSession` (`active`/`pending_human`/`human`) and `type` to
-`PortfolioChatMessage` (`chat`/`request_human`/`human_takeover`) so admin
-replies and visitor human-contact requests are tracked alongside AI messages. Configure a backend-only
-`STUDIO_CREDENTIAL_ENCRYPTION_KEY` as a base64-encoded random 32-byte key;
-credential operations fail closed when it is absent or malformed. Configure a
-separate random `STUDIO_WEBHOOK_SIGNING_KEY` for per-node, versioned webhook
-capabilities; it must not equal the credential-encryption key.
-The public `GET /api/studio/overview` reads these tables and deliberately returns
-the safe portfolio seed if Supabase is not configured, unreachable, or the new
-tables have not been migrated yet. It never returns database errors or secrets.
-
-Authenticated staff routes (session cookie or bearer auth) are:
-
-- `GET /api/admin/studio/workflows` and `GET /api/admin/studio/executions` — all staff roles, including viewer.
-- `POST /api/admin/studio/workflows` and `PATCH /api/admin/studio/workflows/:id` — admin/editor only; credential references are checked before persistence.
-- `POST /api/admin/studio/workflows/:id/nodes/:nodeId/http-request` and `/execute` — execute a saved complete node configuration.
-- `POST /api/admin/studio/http-request/import-curl` — parses a bounded non-shell cURL subset and removes/rejects credential material.
-- `GET|POST /api/admin/studio/credentials`, `PATCH|DELETE /api/admin/studio/credentials/:id`, and `POST /api/admin/studio/credentials/:id/test` — encrypted credential metadata and mutations; secret/ciphertext values are never returned.
-- `POST /api/admin/studio/executions` or `POST /api/admin/studio/workflows/:id/executions` — admin/editor only; atomically queues a validated graph path. Optional `sourceKey` makes starts idempotent.
-- `POST /api/admin/studio/workflows/:id/nodes/:nodeId/execute-previous` — runs the selected trigger path through the target node and persists every node input/output.
-- `GET /api/admin/studio/executions/:id` — authenticated execution and stage details, including persisted input/output; these private fields are excluded from public telemetry.
-- `POST /api/admin/studio/executions/:id/{retry|cancel}` — retries terminal runs or atomically requests cancellation of queued/running work.
-- `DELETE /api/admin/studio/workflows/:id` — admin-only; rejects active runs and cascade-deletes terminal execution history.
-- `GET /api/admin/studio/workflows/:id/nodes/:nodeId/webhook-url` — admin/editor-only scoped webhook path/header capability. Public webhook GET/POST requests require the returned HMAC token in `X-Studio-Webhook-Token`.
-- Active schedule triggers are evaluated once per minute in their configured timezone and deduplicated by persisted source key.
-- `GET /api/admin/studio/audit-logs` — all staff roles; newest 50 mutation events.
-
-Login is limited to 5 attempts per direct client IP per 15 minutes. Studio
-mutations are limited to 30 per minute for both the client IP and authenticated
-session/bearer identity. A rejected request returns HTTP 429 and `Retry-After`.
-Redis provides cross-instance atomic counters when configured; a process-local
-limiter remains active if Redis is absent or temporarily unavailable. Audit
-metadata contains only IP, method, path, and a length-capped user agent—never
-passwords, cookies, authorization headers, or token hashes.
-
-Public execution telemetry is available at
-`GET /api/studio/executions/:id/stages` and as SSE at
-`GET /api/studio/executions/:id/events`. The stream sends an initial `snapshot`,
-changed snapshots only, comment heartbeats, and a bounded-lifetime `reconnect`
-event. It polls Supabase every two seconds, closes immediately on client
-disconnect, and exposes only the public execution projection plus safe stage
-fields (never workflow/admin credentials or audit metadata).
-
-All routes use the standard `{ "ok": true, "data": ... }` or
-`{ "ok": false, "error": ... }` response envelope.
-
-## Run
-
-The config file reads `${ENV}` placeholders, so export the env first (e.g. via
-`set -a; source .env; set +a`) then:
-
-```bash
-go run . -f etc/portfolio-api.yaml
-# Starting portfolio-api at 0.0.0.0:8888...
-```
-
-## Docker
-
-`docker compose` runs the API against Supabase REST configured in `.env`. It does
-not start a local Postgres service:
-
-```bash
-cp .env.example .env   # set Supabase URL/keys
 docker compose up --build
-# API on http://localhost:8888
 ```
 
-Build just the API image:
+Services:
+
+- API: `http://localhost:8888`
+- Redis: `localhost:6379`
+
+Build only the production image:
 
 ```bash
-docker build -t portfolio-api .
-docker run --rm -p 8888:8888 \
-  -e NEXT_PUBLIC_SUPABASE_URL="https://your-project.supabase.co" \
-  -e NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY="..." \
-  -e SUPABASE_SERVICE_ROLE_KEY="..." \
-  -e REDIS_URL="redis://host.docker.internal:6379/0" \
-  -e ARTICLE_CACHE_TTL_SECONDS="300" \
-  -e NEXT_PUBLIC_SITE_URL="https://your-domain.com" \
-  portfolio-api
+docker build -t portfolio-backend-2026 .
+docker run --rm --env-file .env -p 8888:8888 portfolio-backend-2026
 ```
 
-The image is a multi-stage build (static `CGO_ENABLED=0` binary on Alpine,
-runs as a non-root user). Pass all config via environment variables — the
-config file resolves `${ENV}` placeholders at startup.
+The runtime image contains the static API binary, go-zero config, Swagger document, and Swagger UI. It runs as the non-root `app` user.
 
-## Continuous integration and deployment
+## Commands
 
-`.github/workflows/ci.yml` runs on pushes and PRs to `main`:
+| Command | Purpose |
+| --- | --- |
+| `make dev` | Load `.env` and run the API |
+| `make build` | Build `./portfolio-backend` |
+| `make clean` | Remove the local binary |
+| `go test ./...` | Run all tests |
+| `go test ./... -race -count=1` | Run the CI race-enabled test gate |
+| `go vet ./...` | Run Go vet |
+| `golangci-lint run --timeout=5m` | Run the configured lint gate |
+| `gofmt -w <files>` | Format changed Go files |
 
-- **build-and-test** — `gofmt` check, `go vet`, `go build`, `go test -race`.
-- **golangci-lint** — static analysis (config in `.golangci.yml`).
-- **docker** — builds the Docker image (with GHA layer caching). On pushes to
-  `main` and manual dispatches, it also publishes the image to GHCR as:
-  - `ghcr.io/panyakorn04/portfolio-backend-2026:latest`
-  - `ghcr.io/panyakorn04/portfolio-backend-2026:<commit-sha>`
-- **deploy** — after the image is published on `main`, or when manually
-  dispatched from `main`, SSHes into the VPS, syncs app env from GitHub
-  repository variables/secrets into `/opt/apps/.env`, then restarts the
-  `backend` Docker Compose service from `/opt/apps`.
+`portfolio.api` is a contract/reference and the handwritten handlers in `internal/handler/routes.go` are the runtime route source of truth. The current Swagger 2.0 document does not yet represent every newer admin-chat and portfolio human-handoff route, so use the runtime route table below for those surfaces. Keep `portfolio.api`, `swagger.json`, and the handlers synchronized when endpoints change.
 
-### GitHub-managed app env
-
-Runtime app env is managed from GitHub repository settings:
-
-- Variables: `Settings > Secrets and variables > Actions > Variables`
-- Secrets: `Settings > Secrets and variables > Actions > Secrets`
-
-Repository variables:
-
-- `NEXT_PUBLIC_SUPABASE_URL`
-- `NEXT_PUBLIC_SITE_URL`
-- `REDIS_URL`
-- `ARTICLE_CACHE_TTL_SECONDS`
-- `CONTACT_WEBHOOK_URL`
-- `AI_PROVIDER`
-- `OLLAMA_BASE_URL`
-- `OLLAMA_MODEL`
-- `AI_SKILLS_DIR` — defaults to `/opt/ai/skills`; backend skill-profile root mounted from `custom-ai-skills` assets.
-- `PORTFOLIO_CHAT_SESSION_TTL_HOURS` — optional, defaults to `2160` (90 days).
-- `PORTFOLIO_CHAT_MAX_STORED_MESSAGES` — optional, defaults to `100`.
-
-Repository secrets:
-
-- `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY`
-- `SUPABASE_SERVICE_ROLE_KEY`
-- `CONTACT_WEBHOOK_SECRET`
-- `ADMIN_API_TOKEN`
-- `INTERNAL_API_TOKEN`
-- `AI_API_KEY`
-- `PORTFOLIO_CHAT_VISITOR_SECRET` — optional but recommended; generate with `openssl rand -base64 48`. If empty, the backend derives the HMAC key from server-side secrets.
-
-During deploy, GitHub values are primary. If a value is empty in GitHub, the
-workflow preserves the existing value already present in `/opt/apps/.env` so a
-partial GitHub setup does not wipe production secrets.
-
-Production deploy target:
-
-- VPS: `76.13.185.117`
-- App path: `/opt/apps`
-- Backend Compose service: `backend`
-- Caddy route: `http://76.13.185.117/api/`
-
-Required GitHub Actions secrets:
-
-- `VPS_HOST` — `76.13.185.117`.
-- `VPS_USER` — SSH user on the VPS, for example `deploy`.
-- `VPS_SSH_KEY` — private key allowed to SSH into the VPS.
-- `BACKEND_IMAGE` — `ghcr.io/panyakorn04/portfolio-backend-2026:latest`.
-- `GHCR_USERNAME` — optional for public GHCR packages, required if the VPS must
-  authenticate to pull the private image.
-- `GHCR_TOKEN` — optional for public GHCR packages, required if the VPS must
-  authenticate to pull the private image. Use a GitHub PAT with `read:packages`.
-
-The VPS Compose file should use the GHCR image for the backend service. This API
-listens on port `8888`, so expose `8888` to the Compose network and point Caddy
-at `backend:8888`. To let the deploy workflow override the image, use
-`${BACKEND_IMAGE}` with the GHCR image as the default:
-
-```yaml
-backend:
-  image: ${BACKEND_IMAGE:-ghcr.io/panyakorn04/portfolio-backend-2026:latest}
-  container_name: backend
-  restart: unless-stopped
-  environment:
-    NEXT_PUBLIC_SUPABASE_URL: ${NEXT_PUBLIC_SUPABASE_URL}
-    NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY: ${NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY}
-    SUPABASE_SERVICE_ROLE_KEY: ${SUPABASE_SERVICE_ROLE_KEY}
-    REDIS_URL: ${REDIS_URL}
-    ARTICLE_CACHE_TTL_SECONDS: ${ARTICLE_CACHE_TTL_SECONDS:-300}
-    NEXT_PUBLIC_SITE_URL: ${NEXT_PUBLIC_SITE_URL}
-    CONTACT_WEBHOOK_URL: ${CONTACT_WEBHOOK_URL}
-    CONTACT_WEBHOOK_SECRET: ${CONTACT_WEBHOOK_SECRET}
-    ADMIN_API_TOKEN: ${ADMIN_API_TOKEN}
-    INTERNAL_API_TOKEN: ${INTERNAL_API_TOKEN}
-    AI_PROVIDER: ${AI_PROVIDER:-stub}
-    AI_API_KEY: ${AI_API_KEY}
-    OLLAMA_BASE_URL: ${OLLAMA_BASE_URL:-http://ollama:11434}
-    OLLAMA_MODEL: ${OLLAMA_MODEL:-panyakorn-local:latest}
-    OLLAMA_ALLOWED_MODELS: ${OLLAMA_ALLOWED_MODELS:-panyakorn-local:latest}
-    AI_SKILLS_DIR: ${AI_SKILLS_DIR:-/opt/ai/skills}
-    PORTFOLIO_CHAT_VISITOR_SECRET: ${PORTFOLIO_CHAT_VISITOR_SECRET}
-    PORTFOLIO_CHAT_SESSION_TTL_HOURS: ${PORTFOLIO_CHAT_SESSION_TTL_HOURS:-2160}
-    PORTFOLIO_CHAT_MAX_STORED_MESSAGES: ${PORTFOLIO_CHAT_MAX_STORED_MESSAGES:-100}
-  volumes:
-    - ./ai:/opt/ai:ro
-  expose:
-    - "8888"
-```
-
-AI adapter endpoints:
-
-```bash
-# Chat with message history. Returns the shared JSON envelope.
-curl -sS https://api.panyakorn.com/api/ai/chat \
-  -H 'Content-Type: application/json' \
-  -d '{"model":"panyakorn-local:latest","messages":[{"role":"user","content":"ตอบเป็นภาษาไทยสั้น ๆ ว่าพร้อมใช้งานไหม"}]}'
-
-# Streaming chat for TanStack AI / AG-UI clients. Returns text/event-stream.
-curl -N https://api.panyakorn.com/api/ai/chat/stream \
-  -H 'Content-Type: application/json' \
-  -d '{"model":"panyakorn-local:latest","threadId":"thread-demo","runId":"run-demo","messages":[{"role":"user","content":"ตอบสั้น ๆ ว่า API OK"}]}'
-
-# Public portfolio-site assistant profile for panyakorn.com visitors.
-curl -sS https://api.panyakorn.com/api/portfolio/assistant/chat \
-  -H 'Content-Type: application/json' \
-  -d '{"messages":[{"role":"user","content":"รับทำเว็บแบบไหนบ้าง"}]}'
-
-# Streaming portfolio-site assistant profile.
-curl -N https://api.panyakorn.com/api/portfolio/assistant/chat/stream \
-  -H 'Content-Type: application/json' \
-  -d '{"threadId":"portfolio-demo","runId":"run-demo","messages":[{"role":"user","content":"สรุปบริการหลัก"}]}'
-
-# One-shot text generation through Ollama /api/generate.
-curl -sS https://api.panyakorn.com/api/ai/generate \
-  -H 'Content-Type: application/json' \
-  -d '{"prompt":"สรุปสถานะระบบแบบสั้น"}'
-
-# Admin-only: list local Ollama models / running models / version.
-curl -sS https://api.panyakorn.com/api/ai/models \
-  -H 'Authorization: Bearer YOUR_ADMIN_API_TOKEN'
-curl -sS https://api.panyakorn.com/api/ai/running \
-  -H 'Authorization: Bearer YOUR_ADMIN_API_TOKEN'
-curl -sS https://api.panyakorn.com/api/ai/version \
-  -H 'Authorization: Bearer YOUR_ADMIN_API_TOKEN'
-
-# Admin-only: show model metadata. Empty model defaults to OLLAMA_MODEL.
-curl -sS https://api.panyakorn.com/api/ai/model/show \
-  -H 'Authorization: Bearer YOUR_ADMIN_API_TOKEN' \
-  -H 'Content-Type: application/json' \
-  -d '{}'
-
-# Admin-only: embeddings through Ollama /api/embed. Override model for embedding models.
-curl -sS https://api.panyakorn.com/api/ai/embed \
-  -H 'Authorization: Bearer YOUR_ADMIN_API_TOKEN' \
-  -H 'Content-Type: application/json' \
-  -d '{"model":"nomic-embed-text","input":"ข้อความสำหรับค้นหา"}'
-```
-
-These endpoints keep the backend as the adapter boundary: the frontend calls the
-backend, and the backend forwards to the internal Ollama service configured by
-`OLLAMA_BASE_URL`/`OLLAMA_MODEL`. `/api/ai/chat` and `/api/ai/chat/stream`
-accept an optional `model` field, but only models listed in the comma-separated
-`OLLAMA_ALLOWED_MODELS` whitelist are forwarded to Ollama. When omitted, the
-backend uses `OLLAMA_MODEL`. The chat endpoints inject only the pinned
-`ai-console/anti-hallucination-guardrails` skill for
-`ai.panyakorn.com`. Other `ai-console` skills may exist in the asset repo, but
-are not auto-selected by the API. `/api/portfolio/assistant/chat` and
-`/api/portfolio/assistant/chat/stream` inject the public-safe `portfolio-site`
-skill profile for `panyakorn.com`. The stream endpoints convert Ollama's
-newline-delimited stream into AG-UI-compatible `text/event-stream` chunks for
-TanStack AI clients. Chat/generate caps request bodies/messages and applies a
-small in-memory per-client rate limit so the local VPS model cannot be hammered
-unboundedly. Keep Ollama internal-only; do not publish port `11434`.
-
-```caddy
-:80 {
-  handle /api/* {
-    reverse_proxy backend:8888
-  }
-
-  handle {
-    reverse_proxy frontend:80
-  }
-}
-```
-
-The deploy job runs:
-
-```bash
-cd /opt/apps
-BACKEND_IMAGE="$BACKEND_IMAGE" docker compose -f docker-compose.yml -f docker-compose.ai-skills.yml pull backend
-BACKEND_IMAGE="$BACKEND_IMAGE" docker compose -f docker-compose.yml -f docker-compose.ai-skills.yml up -d backend
-docker image prune -f
-```
-
-## Endpoints
-
-All responses use the shared envelope:
-
-- success: `{ "ok": true, "data": ... }`
-- error: `{ "ok": false, "error": { "message": ..., "details": [...] } }`
-
-| Method | Path | Auth |
-|--------|------|------|
-| GET | `/api/health` | public |
-| POST | `/api/contact` | public |
-| GET | `/api/articles` | public |
-| GET | `/api/articles/:slug` | public |
-| GET | `/api/studio/overview` | public, read-only portfolio demo model |
-| GET | `/api/admin/studio/audit-logs` | staff (admin/editor/viewer) |
-| GET/POST/DELETE | `/api/admin/session` | session/bearer |
-| GET | `/api/admin/contact-inquiries` | admin |
-| GET/PATCH | `/api/admin/contact-inquiries/:id` | admin (PATCH: admin/editor) |
-| GET/DELETE | `/api/admin/sessions` | staff |
-| DELETE | `/api/admin/sessions/:id` | staff |
-| GET | `/api/admin/users` | admin |
-| PATCH | `/api/admin/users/:id` | admin |
-| GET/POST | `/api/admin/articles` | admin (POST: admin/editor) |
-| GET/PATCH/DELETE | `/api/admin/articles/:id` | admin (write: admin/editor) |
-| POST | `/api/ai/chat` | public, pinned `ai-console/anti-hallucination-guardrails` skill |
-| POST | `/api/ai/chat/stream` | public, pinned `ai-console/anti-hallucination-guardrails` skill |
-| POST | `/api/portfolio/assistant/chat` | public, `portfolio-site` skills |
-| POST | `/api/portfolio/assistant/chat/stream` | public, `portfolio-site` skills; continues/persists a selected chat when `sessionId` is provided |
-| GET | `/api/portfolio/assistant/sessions/latest` | public, load the visitor's latest anonymous portfolio chat session and messages; UI can pass returned `session.id` to `/api/portfolio/assistant/chat/stream` to continue |
-| GET | `/api/portfolio/assistant/sessions/current` | public, backward-compatible alias for `/api/portfolio/assistant/sessions/latest` |
-| POST | `/api/portfolio/assistant/sessions` | public, start a new anonymous portfolio chat session; requires `title` |
-| DELETE | `/api/portfolio/assistant/sessions/:id` | public, delete current visitor-owned portfolio chat session |
-| POST | `/api/ai/generate` | public, default model only |
-| POST | `/api/ai/embed` | admin |
-| GET | `/api/ai/models` | admin |
-| GET | `/api/ai/running` | admin |
-| GET | `/api/ai/version` | admin |
-| POST | `/api/ai/model/show` | admin |
-| GET | `/api/admin/chat/sessions` | staff (admin/editor/viewer) |
-| GET | `/api/admin/chat/sessions/:id` | staff (admin/editor/viewer) |
-| POST | `/api/admin/chat/sessions/:id/reply` | admin/editor |
-| PATCH | `/api/admin/chat/sessions/:id` | admin/editor |
-| POST | `/api/portfolio/assistant/sessions/:id/request-human` | public — visitor requests human contact; sets session status to `pending_human` |
-| POST | `/api/ai/contact-summary` | admin |
-| POST | `/api/jobs/contact-follow-up` | internal bearer |
-
-## Supabase schema
-
-The schema matches the existing Prisma-generated database on Supabase:
-
-- Table names are PascalCase (`User`, `Article`, ...).
-- Column names are camelCase (`passwordHash`, `createdAt`, ...).
-- IDs are `text` (cuid) with no DB default — the app supplies a cuid-compatible
-  ID on insert (see `internal/model/id.go`).
-- Timestamps are `timestamp`/Supabase-compatible values.
-
-`migrations/0001_init.sql` remains as an optional bootstrap script for a brand-new
-Supabase project. Runtime access does not use direct SQL connections.
-
-## Redis article cache
-
-When `REDIS_URL` is set, the public article endpoints cache their full JSON
-success response:
-
-- `GET /api/articles?lang=...&limit=...`
-- `GET /api/articles/:slug?lang=...`
-
-The default TTL is 5 minutes (`ARTICLE_CACHE_TTL_SECONDS=300`). Cache failures are
-non-fatal; the API falls back to Supabase REST. Admin article create/update/delete
-clears `portfolio:articles:*` keys so public pages refresh after edits.
-
-## Auth notes
-
-- **Sessions**: login sets an httpOnly cookie `portfolio_admin_session` holding a
-  random token; the SHA-256 hash is stored in `AuthSession`. 7-day expiry.
-- **Bearer**: `ADMIN_API_TOKEN` / `INTERNAL_API_TOKEN` bypass role checks.
-- **Passwords**: new users use bcrypt. Existing users created by the original
-  Next.js backend used scrypt (`salt:key` hex) and keep working —
-  `VerifyPassword` accepts both formats, so no re-hash is required.
-- **CORS**: set `CorsOrigins` in the config to the frontend origin so the cookie
-  flow works cross-origin.
-
-## Regenerating from the spec (optional)
-
-`portfolio.api` documents the routes. The handwritten handlers are the source of
-truth; use goctl only if you want to scaffold fresh boilerplate:
+Optional go-zero scaffolding:
 
 ```bash
 goctl api go -api portfolio.api -dir ./_generated
 ```
+
+## API overview
+
+All application JSON responses use a shared envelope:
+
+```json
+{ "ok": true, "data": {} }
+```
+
+```json
+{ "ok": false, "error": { "message": "...", "details": [] } }
+```
+
+Use the hosted [Swagger UI](https://api.panyakorn.com/swagger) for schemas represented by `portfolio.api`. The table below is sourced from `internal/handler/routes.go` and summarizes the complete runtime route groups.
+
+### Public portfolio and AI
+
+| Method | Path | Purpose |
+| --- | --- | --- |
+| `GET` | `/api/health` | Service health |
+| `POST` | `/api/contact` | Validate and persist a contact inquiry |
+| `GET` | `/api/articles` | List localized public articles |
+| `GET` | `/api/articles/:slug` | Read a localized article |
+| `POST` | `/api/ai/chat` | AI-console JSON chat with allowlisted model selection |
+| `POST` | `/api/ai/chat/stream` | AI-console SSE chat |
+| `POST` | `/api/portfolio/assistant/chat` | Public portfolio-assistant JSON chat |
+| `POST` | `/api/portfolio/assistant/chat/stream` | Public portfolio-assistant SSE chat with optional persistence |
+| `GET` | `/api/portfolio/assistant/sessions/current` | Current visitor-owned session |
+| `GET` | `/api/portfolio/assistant/sessions/latest` | Latest visitor-owned session |
+| `POST` | `/api/portfolio/assistant/sessions` | Create an anonymous session |
+| `POST` | `/api/portfolio/assistant/sessions/:id/request-human` | Request human follow-up for an owned session |
+| `DELETE` | `/api/portfolio/assistant/sessions/:id` | Delete an owned session |
+| `POST` | `/api/ai/generate` | One-shot generation using the default model |
+
+### Public Studio projections and triggers
+
+| Method | Path | Purpose |
+| --- | --- | --- |
+| `GET` | `/api/studio/overview` | Public-safe workflow and execution overview |
+| `GET` | `/api/studio/executions/:id/stages` | Public-safe stage projection |
+| `GET` | `/api/studio/executions/:id/events` | SSE execution snapshots |
+| `GET`, `POST` | `/api/studio/webhooks/:id/:nodeId` | Signed webhook trigger using `X-Studio-Webhook-Token` |
+
+### Administration
+
+Admin routes accept either the `portfolio_admin_session` cookie or `Authorization: Bearer <ADMIN_API_TOKEN>`. Session-backed calls enforce `admin`, `editor`, and `viewer` roles; static admin bearer access bypasses role checks.
+
+| Group | Representative paths |
+| --- | --- |
+| Session | `/api/admin/session` |
+| Inquiries | `/api/admin/contact-inquiries`, `/api/admin/contact-inquiries/:id` |
+| Chat inbox | `/api/admin/chat/sessions`, `/:id`, `/:id/reply` |
+| Session management | `/api/admin/sessions`, `/api/admin/sessions/:id` |
+| Users | `/api/admin/users`, `/api/admin/users/:id` |
+| Articles | `/api/admin/articles`, `/api/admin/articles/:id` |
+| Studio workflows | `/api/admin/studio/workflows`, `/workflows/:id` |
+| Studio execution | `/api/admin/studio/executions`, `/executions/:id`, `/retry`, `/cancel` |
+| Studio node tools | `/nodes/:nodeId/execute`, `/execute-previous`, `/http-request` |
+| Studio credentials | `/api/admin/studio/credentials`, `/:id`, `/:id/test` |
+| Studio audit | `/api/admin/studio/audit-logs` |
+| Ollama administration | `/api/ai/models`, `/running`, `/version`, `/model/show`, `/embed` |
+
+`pause` and `approve` execution routes remain registered as explicit legacy command shapes but fail closed with `409`; they are not available runtime transitions.
+
+The internal endpoint `POST /api/jobs/contact-follow-up` requires `INTERNAL_API_TOKEN` bearer authentication.
+
+## Persistence and migrations
+
+Supabase tables retain the original Prisma-compatible naming convention:
+
+- PascalCase tables such as `User`, `Article`, and `AuthSession`
+- camelCase columns such as `passwordHash` and `createdAt`
+- application-generated text IDs
+
+Apply SQL files from `migrations/` in numeric order. They are additive and cover:
+
+1. Base portfolio/admin schema
+2. Anonymous portfolio chat sessions and messages
+3. Studio workflows, executions, stages, audit logs, and seed data
+4. Versioned workflow definitions and durable graph execution RPCs
+5. Encrypted Studio credentials
+6. Schedule/webhook and execution-ownership security hardening
+7. Admin chat access and status operations
+
+GitHub Actions does not apply database migrations. Apply and verify each required migration in Supabase before deploying code that depends on it.
+
+## Authentication and security boundaries
+
+- New passwords use bcrypt; legacy `salt:key` scrypt hashes remain verifiable for migration compatibility.
+- Login creates a random 32-byte session token in an httpOnly `portfolio_admin_session` cookie; only its SHA-256 hash is stored.
+- Admin sessions expire after seven days.
+- Session-based authorization enforces role permissions; `ADMIN_API_TOKEN` is intentionally privileged and bypasses RBAC.
+- Internal jobs use a separate `INTERNAL_API_TOKEN`.
+- Anonymous portfolio visitors are represented by an HMAC-derived identifier, not the raw browser visitor ID.
+- Studio credential ciphertext uses AES-256-GCM and scope-bound AAD; secret values never belong in public DTOs.
+- Studio webhook capabilities use an independent signing key and a request header, never a query-string token.
+- Public execution projections are sanitized separately from authenticated execution detail.
+- Enable trusted proxy handling only behind a proxy that overwrites forwarded client-IP headers.
+- CORS origins are configured in `etc/portfolio-api.yaml`.
+
+## Article cache
+
+When Redis is enabled, successful public article responses are cached for:
+
+- `GET /api/articles?lang=...&limit=...`
+- `GET /api/articles/:slug?lang=...`
+
+The default TTL is five minutes. Redis failures are non-fatal for article reads; the API falls back to Supabase REST. Admin article mutations clear `portfolio:articles:*` keys.
+
+## CI/CD and production deployment
+
+`.github/workflows/ci.yml` runs for pull requests, pushes to `main`, and manual dispatches.
+
+### Validation
+
+- `gofmt` cleanliness
+- `go vet ./...`
+- `go build ./...`
+- `go test ./... -race -count=1`
+- `bash -n deploy/deploy-compose-service.sh`
+- `golangci-lint` v1.64.8
+- Docker Buildx image build
+
+### Immutable release flow
+
+For non-PR runs, the image is published only as:
+
+```text
+ghcr.io/panyakorn04/portfolio-backend-2026:<full-commit-sha>
+```
+
+There is no mutable `latest` deployment tag. Production deploys select the exact commit image, authenticate to GHCR with the short-lived repository `GITHUB_TOKEN`, and remove the temporary Docker credential directory afterward.
+
+The versioned deploy script:
+
+1. Acquires `/opt/apps/.production-deploy.lock`.
+2. Preserves the existing `/opt/apps/.env` and updates only `BACKEND_IMAGE`.
+3. Validates the Compose stack.
+4. Pulls and starts only the `backend` service.
+5. Gates success on `https://api.panyakorn.com/api/studio/overview`.
+6. Restores the prior image automatically if deployment or health verification fails.
+
+Deployment uses these externally provisioned Compose files:
+
+```text
+/opt/apps/docker-compose.yml
+/opt/apps/docker-compose.ai-skills.yml
+/opt/apps/docker-compose.studio.yml
+```
+
+The repository does not contain the complete production Compose/Caddy stack or production application secrets.
+
+### Required production GitHub secrets
+
+```text
+VPS_HOST
+VPS_USER
+VPS_SSH_KEY
+VPS_KNOWN_HOSTS
+```
+
+`VPS_KNOWN_HOSTS` must contain pinned OpenSSH `known_hosts` line(s), not only a fingerprint. The workflow does not sync application secrets from GitHub; production runtime variables remain in `/opt/apps/.env` and must retain least-privilege file permissions.
+
+### Manual rollback
+
+Run **CI/CD → Run workflow**, choose `rollback`, and provide a previously published full lowercase 40-character commit SHA. Image building is skipped and the same health-gated deploy script switches to that immutable release.
+
+### Pulling an Ollama model
+
+The manual **Pull Ollama Model** workflow installs a requested model in the running VPS Ollama container. It does not expose Ollama publicly.
+
+## Related repositories
+
+- [portfolio-2026](https://github.com/panyakorn04/portfolio-2026) — bilingual portfolio and admin frontend
+- [ai-workflow-studio](https://github.com/panyakorn04/ai-workflow-studio) — workflow control-plane frontend
+- [open-webui-theme](https://github.com/panyakorn04/open-webui-theme) — custom AI console frontend
+- [custom-ai-skills](https://github.com/panyakorn04/custom-ai-skills) — mounted AI skill profiles
+
+## License
+
+No open-source license is currently included. Unless a license is added, the source remains all rights reserved by default.
