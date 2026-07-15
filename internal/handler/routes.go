@@ -2,11 +2,38 @@ package handler
 
 import (
 	"net/http"
+	"os"
+	"path/filepath"
 
 	"portfolio-backend/internal/svc"
 
 	"github.com/zeromicro/go-zero/rest"
 )
+
+func SwaggerDocHandler(svcCtx *svc.ServiceContext) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		data, err := os.ReadFile(filepath.Join("swagger.json"))
+		if err != nil {
+			http.Error(w, "swagger.json not found", http.StatusNotFound)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		w.Header().Set("Access-Control-Allow-Origin", "*")
+		w.Write(data)
+	}
+}
+
+func SwaggerUIHandler(svcCtx *svc.ServiceContext) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		data, err := os.ReadFile(filepath.Join("swagger.html"))
+		if err != nil {
+			http.Error(w, "swagger.html not found", http.StatusNotFound)
+			return
+		}
+		w.Header().Set("Content-Type", "text/html; charset=utf-8")
+		w.Write(data)
+	}
+}
 
 func RegisterHandlers(server *rest.Server, svcCtx *svc.ServiceContext) {
 	server.AddRoutes([]rest.Route{
@@ -97,5 +124,10 @@ func RegisterHandlers(server *rest.Server, svcCtx *svc.ServiceContext) {
 		{Method: http.MethodPost, Path: "/api/ai/model/show", Handler: AiShowModelHandler(svcCtx)},
 		{Method: http.MethodPost, Path: "/api/ai/contact-summary", Handler: AiContactSummaryHandler(svcCtx)},
 		{Method: http.MethodPost, Path: "/api/jobs/contact-follow-up", Handler: JobsContactFollowUpHandler(svcCtx)},
+
+		// Swagger
+		{Method: http.MethodGet, Path: "/swagger/doc.json", Handler: SwaggerDocHandler(svcCtx)},
+		{Method: http.MethodGet, Path: "/swagger", Handler: SwaggerUIHandler(svcCtx)},
+		{Method: http.MethodGet, Path: "/swagger/", Handler: SwaggerUIHandler(svcCtx)},
 	})
 }
