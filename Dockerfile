@@ -26,6 +26,8 @@ RUN apk add --no-cache ca-certificates tzdata && \
 WORKDIR /app
 
 COPY --from=builder /app/portfolio-api /app/portfolio-api
+COPY --from=builder /app/swagger.json /app/swagger.json
+COPY --from=builder /app/swagger.html /app/swagger.html
 COPY etc /app/etc
 
 USER app
