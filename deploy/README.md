@@ -1,6 +1,6 @@
 # Production deployment
 
-GitHub Actions publishes `ghcr.io/panyakorn04/portfolio-backend-2026:<commit-sha>` and deploys only that immutable tag. The versioned script updates only `BACKEND_IMAGE` in `/opt/apps/.env`, preserving every other setting and the existing Compose overlays. It gates success on `https://api.panyakorn.com/api/studio/overview` and restores the prior image automatically on failure.
+GitHub Actions publishes `ghcr.io/panyakorn04/portfolio-backend-2026:<commit-sha>` and deploys only that immutable tag. The versioned script updates only `BACKEND_IMAGE` in `/opt/apps/.env`, preserving every other setting and the existing Compose overlays. It gates success on the fail-closed `https://api.panyakorn.com/api/ready` persistence probe and restores the prior image automatically on failure.
 
 Manual rollback: run **CI/CD → Run workflow**, choose `rollback`, and enter a previously published full 40-character commit SHA. Deployments are serialized across the production environment.
 

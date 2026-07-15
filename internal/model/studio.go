@@ -224,6 +224,18 @@ func (m *StudioModel) Overview(ctx context.Context) ([]StudioWorkflow, []StudioE
 	e, err := m.ListExecutions(ctx)
 	return w, e, err
 }
+func (m *StudioModel) Ready(ctx context.Context) error {
+	query := url.Values{"select": {"id"}, "limit": {"1"}}
+	for _, table := range []string{"StudioWorkflow", "StudioExecution"} {
+		var rows []struct {
+			ID string `json:"id"`
+		}
+		if _, err := m.api.request(ctx, http.MethodGet, table, query, nil, "", &rows); err != nil {
+			return err
+		}
+	}
+	return nil
+}
 func workflowBody(in StudioWorkflowInput) map[string]any {
 	return map[string]any{"name": in.Name, "description": in.Description, "category": in.Category, "status": in.Status, "nodes": in.Nodes, "definition": in.Definition, "updatedAt": time.Now().UTC().Format(time.RFC3339)}
 }

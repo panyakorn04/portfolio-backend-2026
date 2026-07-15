@@ -26,7 +26,7 @@ SupabaseServiceRoleKey: ${SUPABASE_SERVICE_ROLE_KEY}
 RedisURL: ${REDIS_URL}
 ArticleCacheTTLSeconds: ${ARTICLE_CACHE_TTL_SECONDS}
 # Enable only behind a trusted proxy that overwrites forwarded client-IP headers.
-TrustProxy: false
+TrustProxy: ${TRUST_PROXY}
 
 # Outbound webhook for contact submissions (optional).
 ContactWebhookURL: ${CONTACT_WEBHOOK_URL}

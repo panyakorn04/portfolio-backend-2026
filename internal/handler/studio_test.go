@@ -54,6 +54,37 @@ func TestStudioOverviewHandlerFallsBackWhenTablesUnavailable(t *testing.T) {
 	}
 }
 
+func TestStudioReadinessHandlerFailsClosedWithoutPersistence(t *testing.T) {
+	rec := httptest.NewRecorder()
+	StudioReadinessHandler(&svc.ServiceContext{}).ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/api/ready", nil))
+	if rec.Code != http.StatusServiceUnavailable {
+		t.Fatalf("status = %d, want 503; body=%s", rec.Code, rec.Body.String())
+	}
+}
+
+func TestStudioReadinessHandlerRequiresLiveStudioTables(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch r.URL.Path {
+		case "/rest/v1/StudioWorkflow", "/rest/v1/StudioExecution":
+			if r.URL.Query().Get("select") != "id" || r.URL.Query().Get("limit") != "1" {
+				t.Fatalf("readiness query must be bounded: %s", r.URL.RawQuery)
+			}
+			_, _ = w.Write([]byte(`[]`))
+		default:
+			t.Fatalf("unexpected readiness path %s", r.URL.Path)
+		}
+	}))
+	defer server.Close()
+
+	svcCtx := &svc.ServiceContext{Studio: model.NewStudioModel(model.NewSupabaseREST(server.URL, "key")), HasDatabse: true}
+	rec := httptest.NewRecorder()
+	StudioReadinessHandler(svcCtx).ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/api/ready", nil))
+	if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), `"ready":true`) {
+		t.Fatalf("status = %d, want 200 readiness; body=%s", rec.Code, rec.Body.String())
+	}
+}
+
 func TestAdminExecuteStudioManualTriggerReturnsJSONOutput(t *testing.T) {
 	var auditBody map[string]any
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

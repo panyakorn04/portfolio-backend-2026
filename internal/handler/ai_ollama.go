@@ -95,7 +95,7 @@ func AiVersionHandler(svcCtx *svc.ServiceContext) http.HandlerFunc {
 
 func AiGenerateHandler(svcCtx *svc.ServiceContext) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		if !allowAIInferenceRequest(w, r) {
+		if !allowAIInferenceRequest(w, r, svcCtx) {
 			return
 		}
 
@@ -160,7 +160,7 @@ func AiEmbedHandler(svcCtx *svc.ServiceContext) http.HandlerFunc {
 		if _, ok := requireAdmin(w, r, svcCtx); !ok {
 			return
 		}
-		if !allowAIInferenceRequest(w, r) {
+		if !allowAIInferenceRequest(w, r, svcCtx) {
 			return
 		}
 
@@ -227,8 +227,8 @@ func validatePublicGenerateRequest(svcCtx *svc.ServiceContext, body aiGenerateRe
 	return response.ErrorDetail{}, true
 }
 
-func allowAIInferenceRequest(w http.ResponseWriter, r *http.Request) bool {
-	clientKey := aiChatClientKey(r)
+func allowAIInferenceRequest(w http.ResponseWriter, r *http.Request, svcCtx *svc.ServiceContext) bool {
+	clientKey := aiChatClientKey(r, svcCtx != nil && svcCtx.Config.TrustProxy)
 	if !aiChatLimiter.allow(clientKey, time.Now()) {
 		response.Error(w, http.StatusTooManyRequests, "Too many AI requests. Please try again later.")
 		return false

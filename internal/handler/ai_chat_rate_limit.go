@@ -1,9 +1,7 @@
 package handler
 
 import (
-	"net"
 	"net/http"
-	"strings"
 	"sync"
 	"time"
 )
@@ -46,21 +44,6 @@ func (l *aiChatRateLimiter) allow(key string, now time.Time) bool {
 	return true
 }
 
-func aiChatClientKey(r *http.Request) string {
-	if forwardedFor := strings.TrimSpace(r.Header.Get("X-Forwarded-For")); forwardedFor != "" {
-		parts := strings.Split(forwardedFor, ",")
-		candidate := strings.TrimSpace(parts[len(parts)-1])
-		if candidate != "" {
-			return candidate
-		}
-	}
-
-	if realIP := strings.TrimSpace(r.Header.Get("X-Real-IP")); realIP != "" {
-		return realIP
-	}
-
-	if host, _, err := net.SplitHostPort(r.RemoteAddr); err == nil && host != "" {
-		return host
-	}
-	return r.RemoteAddr
+func aiChatClientKey(r *http.Request, trustProxy bool) string {
+	return clientIP(r, trustProxy)
 }

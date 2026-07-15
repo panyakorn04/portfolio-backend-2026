@@ -119,6 +119,26 @@ func StudioOverviewHandler(svcCtx *svc.ServiceContext) http.HandlerFunc {
 	}
 }
 
+// StudioReadinessHandler fails closed unless the live Studio persistence tables
+// can be queried. Deployment health gates use this instead of the public
+// overview, which intentionally falls back to seeded portfolio data.
+func StudioReadinessHandler(svcCtx *svc.ServiceContext) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if svcCtx == nil || !svcCtx.HasDatabse || svcCtx.Studio == nil {
+			response.Error(w, http.StatusServiceUnavailable, "Studio persistence is not configured.")
+			return
+		}
+		ctx, cancel := context.WithTimeout(r.Context(), 5*time.Second)
+		defer cancel()
+		if err := svcCtx.Studio.Ready(ctx); err != nil {
+			log.Printf("studio readiness check failed: %v", err)
+			response.Error(w, http.StatusServiceUnavailable, "Studio persistence is unavailable.")
+			return
+		}
+		response.Ok(w, http.StatusOK, map[string]any{"ready": true})
+	}
+}
+
 func validateStudioWorkflow(p studioWorkflowPayload) (model.StudioWorkflowInput, string) {
 	p.Name = strings.TrimSpace(p.Name)
 	p.Description = strings.TrimSpace(p.Description)

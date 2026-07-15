@@ -43,6 +43,7 @@ func RegisterHandlers(server *rest.Server, svcCtx *svc.ServiceContext) {
 	server.AddRoutes([]rest.Route{
 		// Public
 		{Method: http.MethodGet, Path: "/api/health", Handler: HealthHandler(svcCtx)},
+		{Method: http.MethodGet, Path: "/api/ready", Handler: StudioReadinessHandler(svcCtx)},
 		{Method: http.MethodPost, Path: "/api/contact", Handler: ContactHandler(svcCtx)},
 		{Method: http.MethodGet, Path: "/api/articles", Handler: ArticlesHandler(svcCtx)},
 		{Method: http.MethodGet, Path: "/api/articles/:slug", Handler: ArticleBySlugHandler(svcCtx)},

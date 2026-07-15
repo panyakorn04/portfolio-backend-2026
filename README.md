@@ -148,7 +148,9 @@ cd portfolio-backend-2026
 cp .env.example .env
 ```
 
-Set your Supabase URL and keys in `.env`, then create or update an admin user:
+Set your Supabase URL and keys in `.env`. For a clean Supabase project, apply every file in `migrations/` through the Supabase SQL Editor in numeric order before creating users or starting features that depend on those tables.
+
+The CLI intentionally creates only `editor` or `viewer` accounts:
 
 ```bash
 set -a
@@ -158,9 +160,11 @@ set +a
 go run ./cmd/createuser \
   -email you@example.com \
   -password 'replace-this-password' \
-  -role admin \
+  -role editor \
   -name 'Your Name'
 ```
+
+For the first installation, promote that user to `admin` directly in the Supabase dashboard. After bootstrap, an existing admin can manage roles through the admin API. The CLI rejects `-role admin` by design.
 
 Run the API:
 
@@ -191,6 +195,7 @@ Never commit `.env` or production credentials. `.env.example` contains names and
 | `NEXT_PUBLIC_SITE_URL` | Public portfolio origin and secure-cookie decision |
 | `REDIS_URL` | Optional Redis connection; empty disables cache/distributed limits |
 | `ARTICLE_CACHE_TTL_SECONDS` | Public article cache TTL; defaults to 300 seconds |
+| `TRUST_PROXY` | Trust proxy-overwritten client-IP headers for rate limits; keep `false` for direct local exposure and use `true` behind production Caddy |
 
 Production should always provide `SUPABASE_SERVICE_ROLE_KEY`. The service can initialize with the publishable key when the service-role key is empty, but privileged writes may fail under RLS and that fallback is not a production configuration.
 
@@ -217,7 +222,7 @@ openssl rand -base64 48  # STUDIO_WEBHOOK_SIGNING_KEY or visitor secret
 | Variable | Purpose |
 | --- | --- |
 | `AI_PROVIDER` | Provider mode; defaults to `stub` in `.env.example` |
-| `AI_API_KEY` | Optional provider credential |
+| `AI_API_KEY` | Reserved credential input for the contact-summary provider boundary; the current contact-summary implementation remains stub-only |
 | `OLLAMA_BASE_URL` | Internal Ollama API URL |
 | `OLLAMA_MODEL` | Default Ollama model |
 | `OLLAMA_ALLOWED_MODELS` | Comma-separated public chat model allowlist; defaults to the pinned model when empty |
@@ -291,6 +296,7 @@ Use the hosted [Swagger UI](https://api.panyakorn.com/swagger) for schemas repre
 | Method | Path | Purpose |
 | --- | --- | --- |
 | `GET` | `/api/health` | Service health |
+| `GET` | `/api/ready` | Fail-closed deployment readiness check for live Studio persistence tables |
 | `POST` | `/api/contact` | Validate and persist a contact inquiry |
 | `GET` | `/api/articles` | List localized public articles |
 | `GET` | `/api/articles/:slug` | Read a localized article |
@@ -368,7 +374,7 @@ GitHub Actions does not apply database migrations. Apply and verify each require
 - Studio credential ciphertext uses AES-256-GCM and scope-bound AAD; secret values never belong in public DTOs.
 - Studio webhook capabilities use an independent signing key and a request header, never a query-string token.
 - Public execution projections are sanitized separately from authenticated execution detail.
-- Enable trusted proxy handling only behind a proxy that overwrites forwarded client-IP headers.
+- Enable trusted proxy handling only behind a proxy that overwrites forwarded client-IP headers. Login, Studio, and public AI rate-limit keys ignore forwarded headers unless `TrustProxy` is enabled.
 - CORS origins are configured in `etc/portfolio-api.yaml`.
 
 ## Article cache
@@ -410,7 +416,7 @@ The versioned deploy script:
 2. Preserves the existing `/opt/apps/.env` and updates only `BACKEND_IMAGE`.
 3. Validates the Compose stack.
 4. Pulls and starts only the `backend` service.
-5. Gates success on `https://api.panyakorn.com/api/studio/overview`.
+5. Gates success on `https://api.panyakorn.com/api/ready`, which returns an error unless the live Studio persistence tables can be queried.
 6. Restores the prior image automatically if deployment or health verification fails.
 
 Deployment uses these externally provisioned Compose files:
@@ -440,7 +446,7 @@ Run **CI/CD → Run workflow**, choose `rollback`, and provide a previously publ
 
 ### Pulling an Ollama model
 
-The manual **Pull Ollama Model** workflow installs a requested model in the running VPS Ollama container. It does not expose Ollama publicly.
+The manual **Pull Ollama Model** workflow installs a requested model in the running VPS Ollama container through the same pinned `VPS_KNOWN_HOSTS` trust boundary as the main deployment. It does not expose Ollama publicly.
 
 ## Related repositories
 

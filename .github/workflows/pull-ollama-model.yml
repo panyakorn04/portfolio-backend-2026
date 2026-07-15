@@ -22,35 +22,54 @@ jobs:
     runs-on: ubuntu-latest
     environment: production
     steps:
+      - name: Prepare pinned SSH host identity
+        env:
+          VPS_SSH_KEY: ${{ secrets.VPS_SSH_KEY }}
+          VPS_KNOWN_HOSTS: ${{ secrets.VPS_KNOWN_HOSTS }}
+        run: |
+          set -euo pipefail
+          install -m 700 -d ~/.ssh
+          printf '%s\n' "$VPS_SSH_KEY" > ~/.ssh/deploy_key
+          chmod 600 ~/.ssh/deploy_key
+          printf '%s\n' "$VPS_KNOWN_HOSTS" > ~/.ssh/known_hosts
+          chmod 600 ~/.ssh/known_hosts
+          test -s ~/.ssh/known_hosts
       - name: Pull Ollama model
-        uses: appleboy/ssh-action@v1.0.3
         env:
           MODEL: ${{ inputs.model }}
           COMPOSE_DIR: ${{ inputs.compose_dir }}
-        with:
-          host: ${{ secrets.VPS_HOST }}
-          username: ${{ secrets.VPS_USER }}
-          key: ${{ secrets.VPS_SSH_KEY }}
-          command_timeout: 45m
-          envs: MODEL,COMPOSE_DIR
-          script: |
-            set -euo pipefail
-            cd "$COMPOSE_DIR"
+          VPS_HOST: ${{ secrets.VPS_HOST }}
+          VPS_USER: ${{ secrets.VPS_USER }}
+        run: |
+          set -euo pipefail
+          remote_env=$(printf 'MODEL=%q COMPOSE_DIR=%q' "$MODEL" "$COMPOSE_DIR")
+          ssh \
+            -i ~/.ssh/deploy_key \
+            -o BatchMode=yes \
+            -o StrictHostKeyChecking=yes \
+            -o UserKnownHostsFile=~/.ssh/known_hosts \
+            -o ConnectTimeout=60 \
+            -o ServerAliveInterval=15 \
+            -o ServerAliveCountMax=4 \
+            "${VPS_USER}@${VPS_HOST}" "${remote_env} bash -se" <<'REMOTE'
+          set -euo pipefail
+          cd "$COMPOSE_DIR"
 
-            echo "Checking Ollama container..."
-            docker ps --filter name=ollama --format 'table {{.Names}}\t{{.Status}}\t{{.Image}}'
+          echo "Checking Ollama container..."
+          docker ps --filter name=ollama --format 'table {{.Names}}\t{{.Status}}\t{{.Image}}'
 
-            if docker compose config --services | grep -qx ollama; then
-              OLLAMA_CMD="docker compose exec -T ollama ollama"
-            elif docker ps --format '{{.Names}}' | grep -qx ollama; then
-              OLLAMA_CMD="docker exec ollama ollama"
-            else
-              echo "No running ollama container found."
-              exit 1
-            fi
+          if docker compose config --services | grep -qx ollama; then
+            ollama=(docker compose exec -T ollama ollama)
+          elif docker ps --format '{{.Names}}' | grep -qx ollama; then
+            ollama=(docker exec ollama ollama)
+          else
+            echo "No running ollama container found."
+            exit 1
+          fi
 
-            echo "Pulling Ollama model: $MODEL"
-            $OLLAMA_CMD pull "$MODEL"
+          echo "Pulling Ollama model: $MODEL"
+          "${ollama[@]}" pull "$MODEL"
 
-            echo "Installed Ollama models:"
-            $OLLAMA_CMD list
+          echo "Installed Ollama models:"
+          "${ollama[@]}" list
+          REMOTE

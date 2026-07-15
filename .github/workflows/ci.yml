@@ -129,7 +129,7 @@ jobs:
           DEPLOY_IMAGE: ${{ steps.release.outputs.image }}
         run: |
           set -euo pipefail
-          remote_env=$(printf 'DEPLOY_IMAGE=%q IMAGE_VARIABLE=%q SERVICE=%q HEALTH_URL=%q COMPOSE_FILES=%q GHCR_USERNAME=%q' "$DEPLOY_IMAGE" BACKEND_IMAGE backend https://api.panyakorn.com/api/studio/overview 'docker-compose.yml docker-compose.ai-skills.yml docker-compose.studio.yml' "$GHCR_USERNAME")
+          remote_env=$(printf 'DEPLOY_IMAGE=%q IMAGE_VARIABLE=%q SERVICE=%q HEALTH_URL=%q COMPOSE_FILES=%q GHCR_USERNAME=%q' "$DEPLOY_IMAGE" BACKEND_IMAGE backend https://api.panyakorn.com/api/ready 'docker-compose.yml docker-compose.ai-skills.yml docker-compose.studio.yml' "$GHCR_USERNAME")
           for attempt in 1 2 3; do
             if { printf '%s\n' "$GHCR_TOKEN"; cat deploy/deploy-compose-service.sh; } | ssh -i ~/.ssh/deploy_key -o BatchMode=yes -o StrictHostKeyChecking=yes -o ConnectTimeout=60 -o ServerAliveInterval=15 -o ServerAliveCountMax=4 "${VPS_USER}@${VPS_HOST}" "IFS= read -r GHCR_TOKEN; export GHCR_TOKEN; ${remote_env} bash -se"; then
               exit 0

@@ -62,7 +62,7 @@ func PortfolioAssistantChatHandler(svcCtx *svc.ServiceContext) http.HandlerFunc 
 
 func aiChatHandlerForProfile(svcCtx *svc.ServiceContext, skillProfile string) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		clientKey := aiChatClientKey(r)
+		clientKey := aiChatClientKey(r, svcCtx != nil && svcCtx.Config.TrustProxy)
 		if !aiChatLimiter.allow(clientKey, time.Now()) {
 			response.Error(w, http.StatusTooManyRequests, "Too many AI chat requests. Please try again later.")
 			return
@@ -122,7 +122,7 @@ func PortfolioAssistantChatStreamHandler(svcCtx *svc.ServiceContext) http.Handle
 
 func aiChatStreamHandlerForProfile(svcCtx *svc.ServiceContext, skillProfile string) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		clientKey := aiChatClientKey(r)
+		clientKey := aiChatClientKey(r, svcCtx != nil && svcCtx.Config.TrustProxy)
 		if !aiChatLimiter.allow(clientKey, time.Now()) {
 			response.Error(w, http.StatusTooManyRequests, "Too many AI chat requests. Please try again later.")
 			return
