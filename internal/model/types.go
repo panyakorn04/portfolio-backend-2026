@@ -43,6 +43,7 @@ type PortfolioChatSession struct {
 	ThreadID      string    `json:"threadId"`
 	Locale        string    `json:"locale"`
 	Title         *string   `json:"title"`
+	Status        string    `json:"status"`
 	CreatedAt     time.Time `json:"createdAt"`
 	UpdatedAt     time.Time `json:"updatedAt"`
 	LastSeenAt    time.Time `json:"lastSeenAt"`
@@ -53,6 +54,7 @@ type PortfolioChatMessage struct {
 	ID        string         `json:"id"`
 	SessionID string         `json:"sessionId"`
 	Role      string         `json:"role"`
+	Type      string         `json:"type"`
 	Content   string         `json:"content"`
 	CreatedAt time.Time      `json:"createdAt"`
 	Metadata  map[string]any `json:"metadata,omitempty"`

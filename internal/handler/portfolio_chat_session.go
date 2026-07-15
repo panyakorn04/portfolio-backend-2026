@@ -120,6 +120,47 @@ func PortfolioAssistantNewSessionHandler(svcCtx *svc.ServiceContext) http.Handle
 	}
 }
 
+func PortfolioAssistantRequestHumanHandler(svcCtx *svc.ServiceContext) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if !requirePortfolioChatDatabase(w, svcCtx) {
+			return
+		}
+
+		visitorHash, ok := portfolioVisitorHash(w, r, svcCtx)
+		if !ok {
+			response.Error(w, http.StatusServiceUnavailable, "Unable to initialize chat session.")
+			return
+		}
+
+		sessionID := strings.TrimSpace(pathParam(r, "id"))
+		if sessionID == "" {
+			response.Error(w, http.StatusBadRequest, "Session id is required.")
+			return
+		}
+
+		session, err := svcCtx.PortfolioChatSessions.FindByIDForVisitorHash(r.Context(), sessionID, visitorHash, time.Now().UTC())
+		if err != nil {
+			log.Printf("portfolio chat request human find session error: %v", err)
+			response.Error(w, http.StatusServiceUnavailable, "Unable to load chat session.")
+			return
+		}
+		if session == nil {
+			response.Error(w, http.StatusNotFound, "Chat session not found.")
+			return
+		}
+
+		if err := svcCtx.PortfolioChatSessions.UpdateStatus(r.Context(), sessionID, "pending_human"); err != nil {
+			log.Printf("portfolio chat request human update status error: %v", err)
+			response.Error(w, http.StatusServiceUnavailable, "Unable to request human contact.")
+			return
+		}
+
+		svcCtx.PortfolioChatMessages.Append(r.Context(), sessionID, "system", "request_human", "Visitor requested human contact", map[string]any{"source": "portfolio-widget"})
+
+		response.Ok(w, http.StatusOK, map[string]any{"status": "pending_human"})
+	}
+}
+
 func PortfolioAssistantDeleteSessionHandler(svcCtx *svc.ServiceContext) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if !requirePortfolioChatDatabase(w, svcCtx) {

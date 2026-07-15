@@ -57,6 +57,12 @@ func RegisterHandlers(server *rest.Server, svcCtx *svc.ServiceContext) {
 		{Method: http.MethodGet, Path: "/api/admin/contact-inquiries/:id", Handler: AdminGetInquiryHandler(svcCtx)},
 		{Method: http.MethodPatch, Path: "/api/admin/contact-inquiries/:id", Handler: AdminUpdateInquiryHandler(svcCtx)},
 
+		// Admin chat sessions
+		{Method: http.MethodGet, Path: "/api/admin/chat/sessions", Handler: AdminListChatSessionsHandler(svcCtx)},
+		{Method: http.MethodGet, Path: "/api/admin/chat/sessions/:id", Handler: AdminGetChatSessionHandler(svcCtx)},
+		{Method: http.MethodPost, Path: "/api/admin/chat/sessions/:id/reply", Handler: AdminReplyChatSessionHandler(svcCtx)},
+		{Method: http.MethodPatch, Path: "/api/admin/chat/sessions/:id", Handler: AdminUpdateChatSessionHandler(svcCtx)},
+
 		// Admin sessions management
 		{Method: http.MethodGet, Path: "/api/admin/sessions", Handler: AdminListSessionsHandler(svcCtx)},
 		{Method: http.MethodDelete, Path: "/api/admin/sessions", Handler: AdminLogoutEverywhereHandler(svcCtx)},
@@ -81,6 +87,7 @@ func RegisterHandlers(server *rest.Server, svcCtx *svc.ServiceContext) {
 		{Method: http.MethodGet, Path: "/api/portfolio/assistant/sessions/current", Handler: PortfolioAssistantCurrentSessionHandler(svcCtx)},
 		{Method: http.MethodGet, Path: "/api/portfolio/assistant/sessions/latest", Handler: PortfolioAssistantLatestSessionHandler(svcCtx)},
 		{Method: http.MethodPost, Path: "/api/portfolio/assistant/sessions", Handler: PortfolioAssistantNewSessionHandler(svcCtx)},
+		{Method: http.MethodPost, Path: "/api/portfolio/assistant/sessions/:id/request-human", Handler: PortfolioAssistantRequestHumanHandler(svcCtx)},
 		{Method: http.MethodDelete, Path: "/api/portfolio/assistant/sessions/:id", Handler: PortfolioAssistantDeleteSessionHandler(svcCtx)},
 		{Method: http.MethodPost, Path: "/api/ai/generate", Handler: AiGenerateHandler(svcCtx)},
 		{Method: http.MethodPost, Path: "/api/ai/embed", Handler: AiEmbedHandler(svcCtx)},

@@ -358,10 +358,10 @@ func persistPortfolioChatExchange(r *http.Request, svcCtx *svc.ServiceContext, s
 	if svcCtx.PortfolioChatMessages == nil || svcCtx.PortfolioChatSessions == nil {
 		return nil
 	}
-	if _, err := svcCtx.PortfolioChatMessages.Append(r.Context(), sessionID, "user", strings.TrimSpace(userMessage.Content), map[string]any{"source": "portfolio-widget"}); err != nil {
+	if _, err := svcCtx.PortfolioChatMessages.Append(r.Context(), sessionID, "user", "chat", strings.TrimSpace(userMessage.Content), map[string]any{"source": "portfolio-widget"}); err != nil {
 		return err
 	}
-	if _, err := svcCtx.PortfolioChatMessages.Append(r.Context(), sessionID, "assistant", strings.TrimSpace(assistantContent), map[string]any{"source": "portfolio-widget", "model": modelName}); err != nil {
+	if _, err := svcCtx.PortfolioChatMessages.Append(r.Context(), sessionID, "assistant", "chat", strings.TrimSpace(assistantContent), map[string]any{"source": "portfolio-widget", "model": modelName}); err != nil {
 		return err
 	}
 	return svcCtx.PortfolioChatSessions.Touch(r.Context(), sessionID, portfolioChatExpiresAt(svcCtx))
