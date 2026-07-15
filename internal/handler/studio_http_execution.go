@@ -21,10 +21,14 @@ type studioNodeExecutionError struct {
 
 func (e *studioNodeExecutionError) Error() string { return e.Message }
 
-func executeStudioHTTPRequestNode(ctx context.Context, service *svc.ServiceContext, workflowID string, node model.StudioWorkflowNode) ([]map[string]any, *studioNodeExecutionError) {
+func executeStudioHTTPRequestNode(ctx context.Context, service *svc.ServiceContext, workflowID string, node model.StudioWorkflowNode, input []map[string]any) ([]map[string]any, *studioNodeExecutionError) {
 	requestConfig, err := parseStudioHTTPRequestConfig(node.Config)
 	if err != nil {
 		return nil, &studioNodeExecutionError{Code: "invalid_config", Message: err.Error(), HTTPStatus: http.StatusBadRequest}
+	}
+	requestConfig, err = resolveStudioHTTPRequestExpressions(requestConfig, input)
+	if err != nil {
+		return nil, &studioNodeExecutionError{Code: "expression_error", Message: err.Error(), HTTPStatus: http.StatusBadRequest}
 	}
 	parsedURL, err := validateStudioHTTPRequestURL(requestConfig.URL)
 	if err != nil {

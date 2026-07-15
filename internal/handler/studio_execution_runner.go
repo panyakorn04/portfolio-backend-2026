@@ -194,7 +194,7 @@ func (runner *StudioExecutionRunner) execute(ctx context.Context, execution *mod
 			if node.Type != "http-request" {
 				nodeErr = &studioNodeExecutionError{Code: "unsupported_node", Message: "This workflow node is not executable."}
 			} else {
-				output, nodeErr = executeStudioHTTPRequestNode(ctx, runner.service, workflow.ID, node)
+				output, nodeErr = executeStudioHTTPRequestNode(ctx, runner.service, workflow.ID, node, items)
 			}
 		default:
 			nodeErr = &studioNodeExecutionError{Code: "unsupported_node", Message: "This workflow node is not executable."}

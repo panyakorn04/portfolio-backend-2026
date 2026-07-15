@@ -183,6 +183,9 @@ func parseStudioHTTPRequestConfig(raw map[string]any) (studioHTTPRequestConfig, 
 	if err != nil || len(rawURL) == 0 || len(rawURL) > maxStudioHTTPURLBytes || parsedURL.Opaque != "" || parsedURL.Fragment != "" || (parsedURL.Scheme != "http" && parsedURL.Scheme != "https") || parsedURL.Host == "" || parsedURL.User != nil {
 		return studioHTTPRequestConfig{}, errors.New("HTTP request URL is invalid")
 	}
+	if studioStringHasExpression(parsedURL.Scheme) || studioStringHasExpression(parsedURL.Host) {
+		return studioHTTPRequestConfig{}, errors.New("HTTP request URL host cannot use expressions")
+	}
 
 	headers, err := parseStudioHTTPHeaders(raw["headers"])
 	if err != nil {
@@ -243,11 +246,15 @@ func parseStudioHTTPRequestConfig(raw map[string]any) (studioHTTPRequestConfig, 
 	if err != nil {
 		return studioHTTPRequestConfig{}, err
 	}
-	return studioHTTPRequestConfig{
+	config := studioHTTPRequestConfig{
 		Method: method, URL: rawURL, Headers: headers, Body: body,
 		QueryParameters: query, AuthMode: authMode, GenericAuthType: genericAuthType,
 		CredentialID: credentialID, Options: options,
-	}, nil
+	}
+	if err := validateStudioHTTPRequestExpressionSyntax(config); err != nil {
+		return studioHTTPRequestConfig{}, err
+	}
+	return config, nil
 }
 
 func parseStudioHTTPQueryParameters(raw any) ([]studioHTTPQueryParameter, error) {

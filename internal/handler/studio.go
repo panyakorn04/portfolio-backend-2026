@@ -672,6 +672,11 @@ func AdminExecuteStudioHttpRequestHandler(s *svc.ServiceContext) http.HandlerFun
 			response.Error(w, http.StatusBadRequest, err.Error())
 			return
 		}
+		requestConfig, err = resolveStudioHTTPRequestExpressions(requestConfig, nil)
+		if err != nil {
+			response.Error(w, http.StatusBadRequest, err.Error())
+			return
+		}
 		parsedURL, err := validateStudioHTTPRequestURL(requestConfig.URL)
 		if err != nil {
 			response.Error(w, http.StatusBadRequest, err.Error())
