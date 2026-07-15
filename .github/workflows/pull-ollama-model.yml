@@ -16,10 +16,14 @@ concurrency:
   group: pull-ollama-model-${{ inputs.model }}
   cancel-in-progress: false
 
+permissions:
+  contents: read
+
 jobs:
   pull:
     name: Pull model on VPS
     runs-on: ubuntu-latest
+    timeout-minutes: 50
     environment: production
     steps:
       - name: Prepare pinned SSH host identity

@@ -1,6 +1,7 @@
 # Build artifacts
 /portfolio-api
 /portfolio-backend
+/createuser
 *.exe
 
 # Env & secrets
@@ -12,6 +13,8 @@
 .git
 .github
 .gitignore
+.agents
+skills-lock.json
 
 # Docs & local-only files
 README.md

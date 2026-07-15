@@ -394,11 +394,13 @@ The default TTL is five minutes. Redis failures are non-fatal for article reads;
 
 - `gofmt` cleanliness
 - `go vet ./...`
-- `go build ./...`
-- `go test ./... -race -count=1`
-- `bash -n deploy/deploy-compose-service.sh`
-- `golangci-lint` v1.64.8
-- Docker Buildx image build
+- `go test ./... -race -count=1 -shuffle=on` (compiles every package, so CI no longer repeats a separate `go build`)
+- `bash -n` for deployment and image-smoke scripts
+- `golangci-lint` v2.12.2 with its native v2 configuration
+- Docker Buildx `linux/amd64` image build with a reusable GitHub Actions cache
+- Exact-image Docker health check plus an external `/api/health` HTTP probe before deployment
+
+Stale runs are cancelled per pull-request ref, while runs on the same `main` or manual-dispatch ref remain serialized. Third-party actions are pinned to immutable commit SHAs and use Node 24-compatible releases.
 
 ### Immutable release flow
 

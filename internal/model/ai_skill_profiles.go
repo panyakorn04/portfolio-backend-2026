@@ -173,9 +173,9 @@ func buildAISkillContext(skillFiles []aiSkillFile, maxFiles int) string {
 
 func buildAISkillIndex(profile string, skillFiles []aiSkillFile) string {
 	var builder strings.Builder
-	builder.WriteString(fmt.Sprintf("Skill profile %q is available. Select a specific skill only when the user's request clearly matches it. Available skills:", profile))
+	fmt.Fprintf(&builder, "Skill profile %q is available. Select a specific skill only when the user's request clearly matches it. Available skills:", profile)
 	for _, skill := range skillFiles {
-		builder.WriteString(fmt.Sprintf("\n- %s", skill.Name))
+		fmt.Fprintf(&builder, "\n- %s", skill.Name)
 		if skill.Summary != "" {
 			builder.WriteString(": ")
 			builder.WriteString(skill.Summary)
