@@ -205,9 +205,10 @@ func TestFilterStudioHTTPResponseHeadersRedactsAuthenticationMaterial(t *testing
 		"Authorization":    {"Bearer secret"},
 		"X-API-Key":        {"secret"},
 		"X-Client-Secret":  {"secret"},
+		"X-Ratelimit-abc":  {"1"},
 	}
-	filtered := filterStudioHTTPResponseHeaders(headers, []string{"secret"})
-	if filtered.Get("Content-Type") != "application/json" || filtered.Get("Set-Cookie") != "" || filtered.Get("WWW-Authenticate") != "" || filtered.Get("Authorization") != "" || filtered.Get("X-API-Key") != "" || filtered.Get("X-Client-Secret") != "" {
+	filtered := filterStudioHTTPResponseHeaders(headers, []string{"secret", "abc"})
+	if filtered.Get("Content-Type") != "application/json" || filtered.Get("Set-Cookie") != "" || filtered.Get("WWW-Authenticate") != "" || filtered.Get("Authorization") != "" || filtered.Get("X-API-Key") != "" || filtered.Get("X-Client-Secret") != "" || strings.Contains(strings.ToLower(fmt.Sprintf("%v", filtered)), "abc") {
 		t.Fatalf("unexpected filtered headers: %#v", filtered)
 	}
 	body := map[string]any{"token": "prefix-secret-suffix", "secret": "safe-key-value", "items": []any{"secret", "safe"}}
@@ -218,6 +219,10 @@ func TestFilterStudioHTTPResponseHeadersRedactsAuthenticationMaterial(t *testing
 	status, _ := redactStudioCredentialValues("200 secret", []string{"secret"}).(string)
 	if status != "200 [REDACTED]" {
 		t.Fatalf("credential value leaked through HTTP reason phrase: %q", status)
+	}
+	short := redactStudioCredentialValues(map[string]any{"prefix-abc": "200 prefix-abc"}, []string{"abc"}).(map[string]any)
+	if strings.Contains(fmt.Sprintf("%v", short), "abc") {
+		t.Fatalf("short credential value leaked through key or reason phrase: %#v", short)
 	}
 }
 

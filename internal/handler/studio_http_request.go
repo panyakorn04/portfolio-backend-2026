@@ -342,7 +342,7 @@ func redactStudioCredentialValues(value any, secrets []string) any {
 			if typed == secret {
 				return "[REDACTED]"
 			}
-			if len(secret) >= 4 {
+			if secret != "" {
 				typed = strings.ReplaceAll(typed, secret, "[REDACTED]")
 			}
 		}
@@ -381,7 +381,14 @@ func filterStudioHTTPResponseHeaders(headers http.Header, secrets []string) http
 	}
 	for name, values := range headers {
 		lowerName := strings.ToLower(name)
-		if !allowed[lowerName] && !strings.HasPrefix(lowerName, "x-ratelimit-") {
+		containsSecret := false
+		for _, secret := range secrets {
+			if secret != "" && strings.Contains(lowerName, strings.ToLower(secret)) {
+				containsSecret = true
+				break
+			}
+		}
+		if containsSecret || (!allowed[lowerName] && !strings.HasPrefix(lowerName, "x-ratelimit-")) {
 			continue
 		}
 		redacted := make([]string, len(values))
