@@ -128,6 +128,5 @@ func RegisterHandlers(server *rest.Server, svcCtx *svc.ServiceContext) {
 		// Swagger
 		{Method: http.MethodGet, Path: "/swagger/doc.json", Handler: SwaggerDocHandler(svcCtx)},
 		{Method: http.MethodGet, Path: "/swagger", Handler: SwaggerUIHandler(svcCtx)},
-		{Method: http.MethodGet, Path: "/swagger/", Handler: SwaggerUIHandler(svcCtx)},
 	})
 }
