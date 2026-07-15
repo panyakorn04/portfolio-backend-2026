@@ -50,7 +50,7 @@ cp .env.example .env
 
 go mod tidy
 
-# Apply migrations in numeric order through 0013_studio_stage_ownership_security.sql.
+# Apply migrations in numeric order through 0014_studio_execution_rpc_ambiguity.sql.
 
 # Create/update an admin user through Supabase REST
 set -a; source .env; set +a
@@ -91,7 +91,9 @@ private Studio tables/RPCs and hardens cancellation, lease, and crash recovery.
 `migrations/0012_studio_schedule_webhook_security.sql` fixes replay idempotency for
 schedule and webhook execution sources. `migrations/0013_studio_stage_ownership_security.sql`
 locks live execution ownership before completing a stage and revokes the legacy
-execution-creation RPC from browser roles. Configure a backend-only
+execution-creation RPC from browser roles. `migrations/0014_studio_execution_rpc_ambiguity.sql`
+uses local aliases in every lifecycle RPC to prevent PL/pgSQL parameter/column
+ambiguity during stage start, finalization, cancellation, and cleanup. Configure a backend-only
 `STUDIO_CREDENTIAL_ENCRYPTION_KEY` as a base64-encoded random 32-byte key;
 credential operations fail closed when it is absent or malformed. Configure a
 separate random `STUDIO_WEBHOOK_SIGNING_KEY` for per-node, versioned webhook
