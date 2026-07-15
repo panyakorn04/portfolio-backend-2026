@@ -2,7 +2,10 @@
 //
 // Usage:
 //
-//	NEXT_PUBLIC_SUPABASE_URL=... SUPABASE_SERVICE_ROLE_KEY=... go run ./cmd/createuser -email you@example.com -password secret -role admin -name "Your Name"
+//	NEXT_PUBLIC_SUPABASE_URL=... SUPABASE_SERVICE_ROLE_KEY=... go run ./cmd/createuser -email you@example.com -password secret -role editor -name "Your Name"
+//
+// Note: This tool only creates editor or viewer roles. Admin users must be
+// created directly through the Supabase dashboard or by an existing admin.
 package main
 
 import (
@@ -16,10 +19,12 @@ import (
 	"portfolio-backend/internal/model"
 )
 
+var allowedRoles = []string{"editor", "viewer"}
+
 func main() {
 	email := flag.String("email", "", "user email")
 	password := flag.String("password", "", "user password")
-	role := flag.String("role", "admin", "staff role: admin|editor|viewer")
+	role := flag.String("role", "editor", "staff role: editor|viewer")
 	name := flag.String("name", "", "display name (optional)")
 	flag.Parse()
 
@@ -27,8 +32,8 @@ func main() {
 		fmt.Fprintln(os.Stderr, "email and password are required")
 		os.Exit(1)
 	}
-	if !auth.IsStaffRole(*role) {
-		fmt.Fprintf(os.Stderr, "invalid role %q (use admin|editor|viewer)\n", *role)
+	if !isAllowedRole(*role) {
+		fmt.Fprintf(os.Stderr, "invalid role %q (use editor|viewer)\n", *role)
 		os.Exit(1)
 	}
 
@@ -62,4 +67,13 @@ func main() {
 	}
 
 	fmt.Printf("user %s ready (id=%s, role=%s)\n", user.Email, user.ID, user.Role)
+}
+
+func isAllowedRole(role string) bool {
+	for _, r := range allowedRoles {
+		if r == role {
+			return true
+		}
+	}
+	return false
 }

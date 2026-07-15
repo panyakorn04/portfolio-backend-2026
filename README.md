@@ -50,12 +50,13 @@ cp .env.example .env
 
 go mod tidy
 
-# Apply migrations in numeric order through 0014_studio_execution_rpc_ambiguity.sql.
+# Apply migrations in numeric order through 0015_portfolio_chat_admin.sql.
 
-# Create/update an admin user through Supabase REST
+# Create/update an editor or viewer user through Supabase REST
+# (admin roles must be created directly via Supabase dashboard)
 set -a; source .env; set +a
 go run ./cmd/createuser \
-  -email you@example.com -password 'change-me' -role admin -name "You"
+  -email you@example.com -password 'change-me' -role editor -name "You"
 ```
 
 Required Supabase env:
@@ -93,7 +94,11 @@ schedule and webhook execution sources. `migrations/0013_studio_stage_ownership_
 locks live execution ownership before completing a stage and revokes the legacy
 execution-creation RPC from browser roles. `migrations/0014_studio_execution_rpc_ambiguity.sql`
 uses local aliases in every lifecycle RPC to prevent PL/pgSQL parameter/column
-ambiguity during stage start, finalization, cancellation, and cleanup. Configure a backend-only
+ambiguity during stage start, finalization, cancellation, and cleanup.
+`migrations/0015_portfolio_chat_admin.sql` additively adds `status` to
+`PortfolioChatSession` (`active`/`pending_human`/`human`) and `type` to
+`PortfolioChatMessage` (`chat`/`request_human`/`human_takeover`) so admin
+replies and visitor human-contact requests are tracked alongside AI messages. Configure a backend-only
 `STUDIO_CREDENTIAL_ENCRYPTION_KEY` as a base64-encoded random 32-byte key;
 credential operations fail closed when it is absent or malformed. Configure a
 separate random `STUDIO_WEBHOOK_SIGNING_KEY` for per-node, versioned webhook
@@ -404,6 +409,11 @@ All responses use the shared envelope:
 | GET | `/api/ai/running` | admin |
 | GET | `/api/ai/version` | admin |
 | POST | `/api/ai/model/show` | admin |
+| GET | `/api/admin/chat/sessions` | staff (admin/editor/viewer) |
+| GET | `/api/admin/chat/sessions/:id` | staff (admin/editor/viewer) |
+| POST | `/api/admin/chat/sessions/:id/reply` | admin/editor |
+| PATCH | `/api/admin/chat/sessions/:id` | admin/editor |
+| POST | `/api/portfolio/assistant/sessions/:id/request-human` | public — visitor requests human contact; sets session status to `pending_human` |
 | POST | `/api/ai/contact-summary` | admin |
 | POST | `/api/jobs/contact-follow-up` | internal bearer |
 
