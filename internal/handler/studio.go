@@ -263,7 +263,7 @@ var studioNodeConfigKeys = map[string]map[string]bool{
 	"schedule":     {"enabled": true, "mode": true, "timezone": true, "intervalMinutes": true, "time": true, "daysOfWeek": true, "cronExpression": true, "misfirePolicy": true},
 	"manual":       {"enabled": true},
 	"webhook":      {"enabled": true, "method": true, "authMode": true, "responseMode": true, "webhookTokenVersion": true},
-	"http-request": {"method": true, "url": true, "headers": true, "body": true, "queryParameters": true, "authMode": true, "credentialId": true, "options": true},
+	"http-request": {"method": true, "url": true, "headers": true, "body": true, "queryParameters": true, "authMode": true, "genericAuthType": true, "credentialId": true, "options": true},
 }
 
 func validateNodeConfig(node model.StudioWorkflowNode, requireComplete bool) string {
@@ -702,7 +702,7 @@ func AdminExecuteStudioHttpRequestHandler(s *svc.ServiceContext) http.HandlerFun
 				response.Error(w, http.StatusInternalServerError, "Unable to load HTTP request credential.")
 				return
 			}
-			if record == nil || record.Status != "active" {
+			if record == nil || record.Status != "active" || !studioCredentialMatchesGenericAuth(requestConfig.GenericAuthType, record.Type) {
 				response.Error(w, http.StatusConflict, "The selected HTTP request credential is unavailable.")
 				return
 			}
@@ -902,17 +902,19 @@ func studioWorkflowMutation(s *svc.ServiceContext, create bool) http.HandlerFunc
 			checkedCredentials := map[string]bool{}
 			for _, node := range in.Definition.Nodes {
 				credentialID, _ := node.Config["credentialId"].(string)
-				if node.Type != "http-request" || credentialID == "" || checkedCredentials[credentialID] {
+				genericAuthType, _ := node.Config["genericAuthType"].(string)
+				credentialKey := credentialID + "\x00" + genericAuthType
+				if node.Type != "http-request" || credentialID == "" || checkedCredentials[credentialKey] {
 					continue
 				}
-				checkedCredentials[credentialID] = true
+				checkedCredentials[credentialKey] = true
 				credential, findErr := s.Studio.FindCredential(r.Context(), credentialID)
 				if findErr != nil {
 					response.Error(w, http.StatusInternalServerError, "Unable to validate workflow credential references.")
 					return
 				}
-				if credential == nil || credential.Status != "active" {
-					response.Error(w, http.StatusConflict, "A referenced workflow credential is unavailable.")
+				if credential == nil || credential.Status != "active" || !studioCredentialMatchesGenericAuth(genericAuthType, credential.Type) {
+					response.Error(w, http.StatusConflict, "A referenced workflow credential is unavailable or incompatible.")
 					return
 				}
 			}

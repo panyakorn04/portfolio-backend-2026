@@ -53,7 +53,7 @@ func executeStudioHTTPRequestNode(ctx context.Context, service *svc.ServiceConte
 		if findErr != nil {
 			return nil, &studioNodeExecutionError{Code: "credential_unavailable", Message: "Unable to load HTTP request credential.", HTTPStatus: http.StatusConflict}
 		}
-		if record == nil || record.Status != "active" {
+		if record == nil || record.Status != "active" || !studioCredentialMatchesGenericAuth(requestConfig.GenericAuthType, record.Type) {
 			return nil, &studioNodeExecutionError{Code: "credential_unavailable", Message: "HTTP request credential is unavailable.", HTTPStatus: http.StatusConflict}
 		}
 		data, decryptErr := service.StudioCredentialCipher.DecryptFor(studioCredentialCipherScope(record.ID, record.Type), record.EncryptedData)

@@ -19,8 +19,9 @@ func TestParseStudioHTTPRequestConfigSupportsPhase2Contract(t *testing.T) {
 			map[string]any{"name": "limit", "value": "10"},
 			map[string]any{"name": "tag", "value": "go"},
 		},
-		"authMode":     "credential",
-		"credentialId": "credential-1",
+		"authMode":        "credential",
+		"genericAuthType": "headerAuth",
+		"credentialId":    "credential-1",
 		"options": map[string]any{
 			"timeoutMs":              float64(12000),
 			"followRedirects":        false,
@@ -33,7 +34,7 @@ func TestParseStudioHTTPRequestConfigSupportsPhase2Contract(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if config.Method != http.MethodPost || config.CredentialID != "credential-1" || len(config.QueryParameters) != 2 {
+	if config.Method != http.MethodPost || config.GenericAuthType != "headerAuth" || config.CredentialID != "credential-1" || len(config.QueryParameters) != 2 {
 		t.Fatalf("unexpected config: %#v", config)
 	}
 	if config.Options.TimeoutMS != 12000 || config.Options.FollowRedirects || config.Options.MaxRedirects != 2 || config.Options.ResponseFormat != "json" || config.Options.IncludeResponseHeaders || !config.Options.IgnoreHTTPStatusErrors {
@@ -48,6 +49,9 @@ func TestParseStudioHTTPRequestConfigRejectsInvalidPhase2Values(t *testing.T) {
 	cases := []map[string]any{
 		mergeStudioConfig(base, map[string]any{"queryParameters": []any{map[string]any{"name": "", "value": "x"}}}),
 		mergeStudioConfig(base, map[string]any{"authMode": "credential"}),
+		mergeStudioConfig(base, map[string]any{"authMode": "credential", "credentialId": "credential-1"}),
+		mergeStudioConfig(base, map[string]any{"authMode": "credential", "genericAuthType": "basicAuth", "credentialId": "credential-1"}),
+		mergeStudioConfig(base, map[string]any{"authMode": "none", "genericAuthType": "headerAuth"}),
 		mergeStudioConfig(base, map[string]any{"authMode": "inline-token"}),
 		mergeStudioConfig(base, map[string]any{"options": map[string]any{"timeoutMs": float64(99)}}),
 		mergeStudioConfig(base, map[string]any{"options": map[string]any{"maxRedirects": float64(20)}}),
@@ -57,6 +61,21 @@ func TestParseStudioHTTPRequestConfigRejectsInvalidPhase2Values(t *testing.T) {
 		if _, err := parseStudioHTTPRequestConfig(raw); err == nil {
 			t.Fatalf("case %d should fail: %#v", index, raw)
 		}
+	}
+}
+
+func TestGenericHeaderAuthRejectsOtherCredentialTypes(t *testing.T) {
+	t.Parallel()
+	if !studioCredentialMatchesGenericAuth("headerAuth", "header") {
+		t.Fatal("header credential should match Header Auth")
+	}
+	for _, credentialType := range []string{"bearer", "basic", "query"} {
+		if studioCredentialMatchesGenericAuth("headerAuth", credentialType) {
+			t.Fatalf("credential type %q must not match Header Auth", credentialType)
+		}
+	}
+	if studioCredentialMatchesGenericAuth("", "header") {
+		t.Fatal("missing generic auth subtype must fail closed")
 	}
 }
 

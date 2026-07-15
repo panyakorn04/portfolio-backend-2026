@@ -39,6 +39,7 @@ type studioHTTPRequestConfig struct {
 	Body            string
 	QueryParameters []studioHTTPQueryParameter
 	AuthMode        string
+	GenericAuthType string
 	CredentialID    string
 	Options         studioHTTPRequestOptions
 }
@@ -220,10 +221,21 @@ func parseStudioHTTPRequestConfig(raw map[string]any) (studioHTTPRequestConfig, 
 	}
 	credentialID, _ := raw["credentialId"].(string)
 	credentialID = strings.TrimSpace(credentialID)
+	genericAuthType := ""
+	if value, exists := raw["genericAuthType"]; exists {
+		var ok bool
+		genericAuthType, ok = value.(string)
+		if !ok || genericAuthType != "headerAuth" {
+			return studioHTTPRequestConfig{}, errors.New("HTTP request generic authentication type is invalid")
+		}
+	}
 	if authMode == "credential" && (credentialID == "" || len(credentialID) > 128) {
 		return studioHTTPRequestConfig{}, errors.New("HTTP request credential is required")
 	}
-	if authMode == "none" && credentialID != "" {
+	if authMode == "credential" && genericAuthType != "headerAuth" {
+		return studioHTTPRequestConfig{}, errors.New("HTTP request Generic Credential Type requires Header Auth")
+	}
+	if authMode == "none" && (credentialID != "" || genericAuthType != "") {
 		return studioHTTPRequestConfig{}, errors.New("HTTP request credential requires credential authentication mode")
 	}
 
@@ -233,7 +245,8 @@ func parseStudioHTTPRequestConfig(raw map[string]any) (studioHTTPRequestConfig, 
 	}
 	return studioHTTPRequestConfig{
 		Method: method, URL: rawURL, Headers: headers, Body: body,
-		QueryParameters: query, AuthMode: authMode, CredentialID: credentialID, Options: options,
+		QueryParameters: query, AuthMode: authMode, GenericAuthType: genericAuthType,
+		CredentialID: credentialID, Options: options,
 	}, nil
 }
 
@@ -337,6 +350,10 @@ func studioConfigInteger(value any) (int, bool) {
 	default:
 		return 0, false
 	}
+}
+
+func studioCredentialMatchesGenericAuth(genericAuthType, credentialType string) bool {
+	return genericAuthType == "headerAuth" && credentialType == "header"
 }
 
 func applyStudioCredential(request *http.Request, credential *studioResolvedCredential) error {
