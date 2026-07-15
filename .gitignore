@@ -1,6 +1,7 @@
 # Binaries
 /portfolio-backend
 /portfolio-api
+/createuser
 *.exe
 
 # Env

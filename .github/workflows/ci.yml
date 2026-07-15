@@ -21,8 +21,8 @@ permissions:
   contents: read
 
 concurrency:
-  group: portfolio-production
-  cancel-in-progress: false
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 env:
   IMAGE_REPOSITORY: ghcr.io/panyakorn04/portfolio-backend-2026
@@ -30,59 +30,67 @@ env:
 jobs:
   validate:
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-go@v5
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+      - uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6.5.0
         with:
-          go-version: "1.23"
+          go-version-file: go.mod
           cache: true
-      - name: Format, vet, build, and test
+      - name: Check formatting
         run: |
           set -euo pipefail
           test -z "$(gofmt -l .)" || { gofmt -l .; exit 1; }
-          go vet ./...
-          go build ./...
-          go test ./... -race -count=1
+      - name: Vet
+        run: go vet ./...
+      - name: Test with race detector
+        run: go test ./... -race -count=1 -shuffle=on
       - name: Validate deploy script
-        run: bash -n deploy/deploy-compose-service.sh
+        run: bash -n deploy/deploy-compose-service.sh .github/scripts/smoke-test-image.sh
 
   lint:
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-go@v5
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+      - uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6.5.0
         with:
-          go-version: "1.23"
+          go-version-file: go.mod
           cache: true
-      - uses: golangci/golangci-lint-action@v6
+      - uses: golangci/golangci-lint-action@ba0d7d2ec06a0ea1cb5fa41b2e4a3ab91d21278a # v9.3.0
         with:
-          version: v1.64.8
+          version: v2.12.2
           args: --timeout=5m
 
   image:
     if: github.event_name != 'workflow_dispatch' || inputs.action != 'rollback'
     needs: [validate, lint]
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     permissions:
       contents: read
       packages: write
     steps:
-      - uses: actions/checkout@v4
-      - uses: docker/setup-buildx-action@v3
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+      - uses: docker/setup-buildx-action@bb05f3f5519dd87d3ba754cc423b652a5edd6d2c # v4.2.0
       - name: Log in to GHCR
         if: github.event_name != 'pull_request'
-        uses: docker/login-action@v3
+        uses: docker/login-action@af1e73f918a031802d376d3c8bbc3fe56130a9b0 # v4.4.0
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
-      - uses: docker/build-push-action@v6
+      - uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a # v7.3.0
         with:
           context: .
+          platforms: linux/amd64
+          load: ${{ github.event_name == 'pull_request' }}
           push: ${{ github.event_name != 'pull_request' }}
           tags: ${{ env.IMAGE_REPOSITORY }}:${{ github.sha }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
+      - name: Smoke test exact image
+        run: bash .github/scripts/smoke-test-image.sh "${IMAGE_REPOSITORY}:${GITHUB_SHA}"
 
   deploy:
     if: >-
@@ -91,12 +99,13 @@ jobs:
       (needs.image.result == 'success' || (github.event_name == 'workflow_dispatch' && inputs.action == 'rollback' && needs.image.result == 'skipped'))
     needs: [validate, lint, image]
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     environment: production
     permissions:
       contents: read
       packages: read
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
       - name: Select immutable image
         id: release
         env:
