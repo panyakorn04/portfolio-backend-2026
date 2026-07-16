@@ -35,6 +35,28 @@ type (
 		Role string `json:"role"`
 	}
 
+	ArticleSectionRequest {
+		Heading    string   `json:"heading"`
+		Paragraphs []string `json:"paragraphs"`
+	}
+
+	ArticleTranslationRequest {
+		Locale      string                  `json:"locale"`
+		Title       string                  `json:"title"`
+		Summary     string                  `json:"summary"`
+		Lead        string                  `json:"lead"`
+		ReadingTime string                  `json:"readingTime"`
+		Content     string                  `json:"content"`
+		Sections    []ArticleSectionRequest `json:"sections,optional"`
+	}
+
+	ArticleRequest {
+		Slug         string                      `json:"slug,optional"`
+		Category     string                      `json:"category"`
+		Status       string                      `json:"status"`
+		Translations []ArticleTranslationRequest `json:"translations"`
+	}
+
 	InquiryIDRequest {
 		InquiryID string `json:"inquiryId"`
 	}
@@ -161,13 +183,13 @@ service portfolio-api {
 	get /api/admin/articles
 
 	@handler createArticle
-	post /api/admin/articles
+	post /api/admin/articles (ArticleRequest)
 
 	@handler getArticle
 	get /api/admin/articles/:id
 
 	@handler updateArticle
-	patch /api/admin/articles/:id
+	patch /api/admin/articles/:id (ArticleRequest)
 
 	@handler deleteArticle
 	delete /api/admin/articles/:id

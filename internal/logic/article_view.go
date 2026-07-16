@@ -22,6 +22,7 @@ type ArticleDetail struct {
 	Lead        string                 `json:"lead"`
 	ReadingTime string                 `json:"readingTime"`
 	PublishedAt string                 `json:"publishedAt"`
+	Content     string                 `json:"content"`
 	Sections    []model.ArticleSection `json:"sections"`
 }
 
@@ -78,6 +79,6 @@ func ToDetail(article *model.Article, locale string) *ArticleDetail {
 		Slug: article.Slug, Category: article.Category,
 		Title: t.Title, Summary: t.Summary, Lead: t.Lead,
 		ReadingTime: t.ReadingTime, PublishedAt: formatPublishedAt(article),
-		Sections: sections,
+		Content: t.Content, Sections: sections,
 	}
 }

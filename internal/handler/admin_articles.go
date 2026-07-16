@@ -12,6 +12,8 @@ import (
 	"portfolio-backend/internal/svc"
 )
 
+const maxArticleRequestBytes = 1 << 20
+
 func isArticleStatusFilter(value string) bool {
 	if value == "all" {
 		return true
@@ -92,7 +94,7 @@ func AdminCreateArticleHandler(svcCtx *svc.ServiceContext) http.HandlerFunc {
 		}
 
 		var payload logic.ArticlePayload
-		if !decodeJSON(w, r, &payload) {
+		if !decodeJSONWithLimit(w, r, &payload, maxArticleRequestBytes) {
 			return
 		}
 
@@ -162,7 +164,7 @@ func AdminUpdateArticleHandler(svcCtx *svc.ServiceContext) http.HandlerFunc {
 
 		id := pathParam(r, "id")
 		var payload logic.ArticlePayload
-		if !decodeJSON(w, r, &payload) {
+		if !decodeJSONWithLimit(w, r, &payload, maxArticleRequestBytes) {
 			return
 		}
 

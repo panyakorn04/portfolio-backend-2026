@@ -360,6 +360,7 @@ Apply SQL files from `migrations/` in numeric order. They are additive and cover
 5. Encrypted Studio credentials
 6. Schedule/webhook and execution-ownership security hardening
 7. Admin chat access and status operations
+8. Markdown article content as the authoritative body, with escaped legacy-section backfill
 
 GitHub Actions does not apply database migrations. Apply and verify each required migration in Supabase before deploying code that depends on it.
 

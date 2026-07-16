@@ -32,6 +32,7 @@ type articleTranslationRow struct {
 	Summary     string          `json:"summary"`
 	Lead        string          `json:"lead"`
 	ReadingTime string          `json:"readingTime"`
+	Content     string          `json:"content"`
 	Sections    json.RawMessage `json:"sections"`
 }
 
@@ -47,7 +48,16 @@ func convertTranslationRow(row articleTranslationRow) (ArticleTranslation, error
 			return ArticleTranslation{}, err
 		}
 	}
-	return ArticleTranslation{ID: row.ID, Locale: row.Locale, Title: row.Title, Summary: row.Summary, Lead: row.Lead, ReadingTime: row.ReadingTime, Sections: sections}, nil
+	return ArticleTranslation{
+		ID:          row.ID,
+		Locale:      row.Locale,
+		Title:       row.Title,
+		Summary:     row.Summary,
+		Lead:        row.Lead,
+		ReadingTime: row.ReadingTime,
+		Content:     row.Content,
+		Sections:    sections,
+	}, nil
 }
 
 func (m *ArticleModel) loadTranslations(ctx context.Context, articles []Article) error {
@@ -229,7 +239,17 @@ func translationBodies(articleID string, translations []ArticleTranslation) ([]m
 		if err != nil {
 			return nil, err
 		}
-		bodies = append(bodies, map[string]any{"id": newID(), "articleId": articleID, "locale": t.Locale, "title": t.Title, "summary": t.Summary, "lead": t.Lead, "readingTime": t.ReadingTime, "sections": json.RawMessage(sections)})
+		bodies = append(bodies, map[string]any{
+			"id":          newID(),
+			"articleId":   articleID,
+			"locale":      t.Locale,
+			"title":       t.Title,
+			"summary":     t.Summary,
+			"lead":        t.Lead,
+			"readingTime": t.ReadingTime,
+			"content":     t.Content,
+			"sections":    json.RawMessage(sections),
+		})
 	}
 	return bodies, nil
 }
@@ -254,7 +274,46 @@ func (m *ArticleModel) Create(ctx context.Context, in ArticleInput) (*Article, e
 	return m.FindByID(ctx, id)
 }
 
+func preserveMissingSections(
+	existing []ArticleTranslation,
+	incoming []ArticleTranslation,
+) []ArticleTranslation {
+	existingByLocale := make(map[string][]ArticleSection, len(existing))
+	for _, translation := range existing {
+		existingByLocale[translation.Locale] = translation.Sections
+	}
+
+	merged := make([]ArticleTranslation, 0, len(incoming))
+	for _, translation := range incoming {
+		if len(translation.Sections) == 0 {
+			if sections, ok := existingByLocale[translation.Locale]; ok {
+				translation.Sections = cloneArticleSections(sections)
+			}
+		}
+		merged = append(merged, translation)
+	}
+	return merged
+}
+
+func cloneArticleSections(sections []ArticleSection) []ArticleSection {
+	cloned := make([]ArticleSection, 0, len(sections))
+	for _, section := range sections {
+		section.Paragraphs = append([]string{}, section.Paragraphs...)
+		cloned = append(cloned, section)
+	}
+	return cloned
+}
+
 func (m *ArticleModel) Update(ctx context.Context, id string, in ArticleInput) (*Article, error) {
+	current, err := m.FindByID(ctx, id)
+	if err != nil {
+		return nil, err
+	}
+	if current == nil {
+		return nil, ErrNotFound
+	}
+	in.Translations = preserveMissingSections(current.Translations, in.Translations)
+
 	values := url.Values{}
 	values.Set("id", "eq."+id)
 	values.Set("select", "id")

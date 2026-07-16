@@ -2,6 +2,7 @@ package handler
 
 import (
 	"encoding/json"
+	"errors"
 	"net/http"
 
 	"portfolio-backend/internal/auth"
@@ -19,6 +20,25 @@ func pathParam(r *http.Request, name string) string {
 // decodeJSON parses the request body into v. Returns false (and writes a 400) on failure.
 func decodeJSON(w http.ResponseWriter, r *http.Request, v any) bool {
 	if err := json.NewDecoder(r.Body).Decode(v); err != nil {
+		response.Error(w, http.StatusBadRequest, "Request body must be valid JSON.")
+		return false
+	}
+	return true
+}
+
+func decodeJSONWithLimit(
+	w http.ResponseWriter,
+	r *http.Request,
+	v any,
+	maxBytes int64,
+) bool {
+	r.Body = http.MaxBytesReader(w, r.Body, maxBytes)
+	if err := json.NewDecoder(r.Body).Decode(v); err != nil {
+		var maxBytesError *http.MaxBytesError
+		if errors.As(err, &maxBytesError) {
+			response.Error(w, http.StatusRequestEntityTooLarge, "Request body is too large.")
+			return false
+		}
 		response.Error(w, http.StatusBadRequest, "Request body must be valid JSON.")
 		return false
 	}

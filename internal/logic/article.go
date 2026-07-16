@@ -11,10 +11,14 @@ import (
 var ArticleStatuses = []string{"draft", "published"}
 var ArticleLocales = []string{"en", "th"}
 
+const maxArticleContentBytes = 256 << 10
+
 var (
-	slugInvalidChars = regexp.MustCompile(`[^a-z0-9\s-]`)
-	slugSpaces       = regexp.MustCompile(`\s+`)
-	slugDashes       = regexp.MustCompile(`-+`)
+	slugInvalidChars    = regexp.MustCompile(`[^a-z0-9\s-]`)
+	slugSpaces          = regexp.MustCompile(`\s+`)
+	slugDashes          = regexp.MustCompile(`-+`)
+	rawHTMLPattern      = regexp.MustCompile(`(?is)<\s*/?\s*[a-z][^>]*>`)
+	dangerousURLPattern = regexp.MustCompile(`(?i)\]\(\s*(?:javascript|vbscript|data):`)
 )
 
 // BuildArticleSlug mirrors the original slugify behavior.
@@ -47,6 +51,7 @@ type RawTranslation struct {
 	Summary     string `json:"summary"`
 	Lead        string `json:"lead"`
 	ReadingTime string `json:"readingTime"`
+	Content     string `json:"content"`
 	Sections    []struct {
 		Heading    string   `json:"heading"`
 		Paragraphs []string `json:"paragraphs"`
@@ -63,10 +68,7 @@ type ArticlePayload struct {
 
 func validateSections(raw RawTranslation, locale string, details *[]response.ErrorDetail) []model.ArticleSection {
 	if len(raw.Sections) == 0 {
-		*details = append(*details, response.ErrorDetail{
-			Field: "translations." + locale + ".sections", Message: "At least one section is required.",
-		})
-		return nil
+		return []model.ArticleSection{}
 	}
 
 	var parsed []model.ArticleSection
@@ -150,6 +152,7 @@ func ValidateArticlePayload(payload ArticlePayload) (*model.ArticleInput, []resp
 		summary := strings.TrimSpace(raw.Summary)
 		lead := strings.TrimSpace(raw.Lead)
 		readingTime := strings.TrimSpace(raw.ReadingTime)
+		content := strings.TrimSpace(raw.Content)
 
 		if title == "" {
 			details = append(details, response.ErrorDetail{Field: "translations." + locale + ".title", Message: "Title is required."})
@@ -165,11 +168,40 @@ func ValidateArticlePayload(payload ArticlePayload) (*model.ArticleInput, []resp
 		}
 
 		sections := validateSections(*raw, locale, &details)
+		if content == "" {
+			details = append(details, response.ErrorDetail{
+				Field: "translations." + locale + ".content", Message: "Article content is required.",
+			})
+		}
+		contentTooLarge := len(content) > maxArticleContentBytes
+		hasRawHTML := rawHTMLPattern.MatchString(content)
+		hasDangerousURL := dangerousURLPattern.MatchString(content)
+		if contentTooLarge {
+			details = append(details, response.ErrorDetail{
+				Field: "translations." + locale + ".content", Message: "Article content must not exceed 256 KiB.",
+			})
+		}
+		if hasRawHTML {
+			details = append(details, response.ErrorDetail{
+				Field: "translations." + locale + ".content", Message: "Raw HTML is not allowed in article content.",
+			})
+		}
+		if hasDangerousURL {
+			details = append(details, response.ErrorDetail{
+				Field: "translations." + locale + ".content", Message: "Article links must use a safe URL scheme.",
+			})
+		}
 
-		if title != "" && summary != "" && lead != "" && readingTime != "" && len(sections) > 0 {
+		contentValid := content != "" && !contentTooLarge && !hasRawHTML && !hasDangerousURL
+		if title != "" && summary != "" && lead != "" && readingTime != "" && contentValid {
 			translations = append(translations, model.ArticleTranslation{
-				Locale: locale, Title: title, Summary: summary,
-				Lead: lead, ReadingTime: readingTime, Sections: sections,
+				Locale:      locale,
+				Title:       title,
+				Summary:     summary,
+				Lead:        lead,
+				ReadingTime: readingTime,
+				Content:     content,
+				Sections:    sections,
 			})
 		}
 	}

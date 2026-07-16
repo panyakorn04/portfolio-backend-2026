@@ -73,6 +73,7 @@ type supabaseTranslationRow struct {
 	Summary     string          `json:"summary"`
 	Lead        string          `json:"lead"`
 	ReadingTime string          `json:"readingTime"`
+	Content     string          `json:"content"`
 	Sections    json.RawMessage `json:"sections"`
 }
 
@@ -122,6 +123,7 @@ func convertSupabaseTranslation(row supabaseTranslationRow) (ArticleTranslation,
 		Summary:     row.Summary,
 		Lead:        row.Lead,
 		ReadingTime: row.ReadingTime,
+		Content:     row.Content,
 		Sections:    sections,
 	}, nil
 }

@@ -99,13 +99,15 @@ type ArticleSection struct {
 }
 
 type ArticleTranslation struct {
-	ID          string           `json:"id"`
-	Locale      string           `json:"locale"`
-	Title       string           `json:"title"`
-	Summary     string           `json:"summary"`
-	Lead        string           `json:"lead"`
-	ReadingTime string           `json:"readingTime"`
-	Sections    []ArticleSection `json:"sections"`
+	ID          string `json:"id"`
+	Locale      string `json:"locale"`
+	Title       string `json:"title"`
+	Summary     string `json:"summary"`
+	Lead        string `json:"lead"`
+	ReadingTime string `json:"readingTime"`
+	Content     string `json:"content"`
+	// Sections is retained for legacy reads; Content is the authoritative article body.
+	Sections []ArticleSection `json:"sections"`
 }
 
 type Article struct {
