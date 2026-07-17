@@ -16,6 +16,14 @@ on:
         description: Full 40-character image commit SHA (required for rollback)
         type: string
         required: false
+      migration_verified:
+        description: Production migrations in this release were manually applied and verified
+        type: boolean
+        default: false
+      emergency_override:
+        description: Bypass the protected deployment window for an approved emergency
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -25,7 +33,7 @@ concurrency:
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 env:
-  IMAGE_REPOSITORY: ghcr.io/panyakorn04/portfolio-backend-2026
+  IMAGE_REPOSITORY: ${{ vars.BACKEND_IMAGE_REPOSITORY }}
 
 jobs:
   validate:
@@ -45,8 +53,14 @@ jobs:
         run: go vet ./...
       - name: Test with race detector
         run: go test ./... -race -count=1 -shuffle=on
-      - name: Validate deploy script
-        run: bash -n deploy/deploy-compose-service.sh .github/scripts/smoke-test-image.sh
+      - name: Validate deployment scripts
+        run: >-
+          bash -n
+          deploy/deploy-compose-service.sh
+          .github/scripts/smoke-test-image.sh
+          .github/scripts/deploy-preflight.sh
+          .github/scripts/reconcile-rollout.sh
+          .github/scripts/notify-deploy.sh
 
   lint:
     runs-on: ubuntu-latest
@@ -66,13 +80,18 @@ jobs:
     if: github.event_name != 'workflow_dispatch' || inputs.action != 'rollback'
     needs: [validate, lint]
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 25
     permissions:
       contents: read
       packages: write
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
       - uses: docker/setup-buildx-action@bb05f3f5519dd87d3ba754cc423b652a5edd6d2c # v4.2.0
+      - name: Validate image configuration
+        run: |
+          set -euo pipefail
+          test -n "$IMAGE_REPOSITORY"
+          [[ "$IMAGE_REPOSITORY" == ghcr.io/* ]]
       - name: Log in to GHCR
         if: github.event_name != 'pull_request'
         uses: docker/login-action@af1e73f918a031802d376d3c8bbc3fe56130a9b0 # v4.4.0
@@ -84,66 +103,207 @@ jobs:
         with:
           context: .
           platforms: linux/amd64
-          load: ${{ github.event_name == 'pull_request' }}
-          push: ${{ github.event_name != 'pull_request' }}
+          load: true
+          push: false
           tags: ${{ env.IMAGE_REPOSITORY }}:${{ github.sha }}
+          labels: |
+            org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
+            org.opencontainers.image.revision=${{ github.sha }}
+            org.opencontainers.image.title=portfolio-backend-2026
           cache-from: type=gha
           cache-to: type=gha,mode=max
+      - name: Scan exact image for vulnerabilities
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        with:
+          image-ref: ${{ env.IMAGE_REPOSITORY }}:${{ github.sha }}
+          format: table
+          exit-code: '1'
+          ignore-unfixed: true
+          vuln-type: os,library
+          severity: CRITICAL,HIGH
       - name: Smoke test exact image
         run: bash .github/scripts/smoke-test-image.sh "${IMAGE_REPOSITORY}:${GITHUB_SHA}"
+      - name: Publish verified image
+        if: github.event_name != 'pull_request'
+        uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a # v7.3.0
+        with:
+          context: .
+          platforms: linux/amd64
+          push: true
+          tags: ${{ env.IMAGE_REPOSITORY }}:${{ github.sha }}
+          labels: |
+            org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
+            org.opencontainers.image.revision=${{ github.sha }}
+            org.opencontainers.image.title=portfolio-backend-2026
+          cache-from: type=gha
 
-  deploy:
+  deploy-preflight:
     if: >-
       always() && github.event_name != 'pull_request' && github.ref == 'refs/heads/main' &&
       needs.validate.result == 'success' && needs.lint.result == 'success' &&
-      (needs.image.result == 'success' || (github.event_name == 'workflow_dispatch' && inputs.action == 'rollback' && needs.image.result == 'skipped'))
+      (needs.image.result == 'success' ||
+       (github.event_name == 'workflow_dispatch' && inputs.action == 'rollback' && needs.image.result == 'skipped'))
     needs: [validate, lint, image]
     runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      actions: read
+      contents: read
+      packages: read
+    outputs:
+      release_image: ${{ steps.preflight.outputs.release_image }}
+      previous_image: ${{ steps.preflight.outputs.previous_image }}
+      rollback_worthy: ${{ steps.preflight.outputs.rollback_worthy }}
+      migrations: ${{ steps.preflight.outputs.migrations }}
+      window_ok: ${{ steps.preflight.outputs.window_ok }}
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          fetch-depth: 0
+      - name: Run production rollout preflight
+        id: preflight
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          ACTION: ${{ inputs.action }}
+          RELEASE_SHA: ${{ github.sha }}
+          REQUESTED_IMAGE_SHA: ${{ inputs.image_sha }}
+          BEFORE_SHA: ${{ github.event.before }}
+          MIGRATION_VERIFIED: ${{ inputs.migration_verified }}
+          EMERGENCY_OVERRIDE: ${{ inputs.emergency_override }}
+          DEPLOY_TIMEZONE: ${{ vars.DEPLOY_TIMEZONE }}
+          DEPLOY_HEALTH_URL: ${{ vars.BACKEND_HEALTH_URL }}
+          DEPLOY_COMPOSE_FILES: ${{ vars.BACKEND_COMPOSE_FILES }}
+          DEPLOY_SERVICE: ${{ vars.BACKEND_COMPOSE_SERVICE }}
+          DEPLOY_IMAGE_VARIABLE: ${{ vars.BACKEND_IMAGE_VARIABLE }}
+        run: bash .github/scripts/deploy-preflight.sh
+
+  deploy:
+    if: always() && needs.deploy-preflight.result == 'success'
+    needs: [deploy-preflight]
+    runs-on: ubuntu-latest
     timeout-minutes: 30
-    environment: production
+    environment:
+      name: production
+      url: ${{ vars.BACKEND_HEALTH_URL }}
     permissions:
       contents: read
       packages: read
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
-      - name: Select immutable image
-        id: release
+      - name: Notify deployment start
         env:
-          REQUESTED_SHA: ${{ inputs.image_sha }}
-          ACTION: ${{ inputs.action }}
-        run: |
-          set -euo pipefail
-          sha="$GITHUB_SHA"
-          if [ "${ACTION:-deploy}" = rollback ]; then sha="$REQUESTED_SHA"; fi
-          [[ "$sha" =~ ^[0-9a-f]{40}$ ]] || { echo "image_sha must be a full lowercase 40-character commit SHA" >&2; exit 1; }
-          echo "image=${IMAGE_REPOSITORY}:${sha}" >> "$GITHUB_OUTPUT"
+          DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
+          DEPLOY_IMAGE: ${{ needs.deploy-preflight.outputs.release_image }}
+          PREVIOUS_IMAGE: ${{ needs.deploy-preflight.outputs.previous_image }}
+        run: bash .github/scripts/notify-deploy.sh start
       - name: Prepare pinned SSH host identity
         env:
+          VPS_HOST: ${{ secrets.VPS_HOST }}
           VPS_SSH_KEY: ${{ secrets.VPS_SSH_KEY }}
           VPS_KNOWN_HOSTS: ${{ secrets.VPS_KNOWN_HOSTS }}
         run: |
           set -euo pipefail
+          test -n "$VPS_SSH_KEY"
+          test -n "$VPS_KNOWN_HOSTS"
           install -m 700 -d ~/.ssh
           printf '%s\n' "$VPS_SSH_KEY" > ~/.ssh/deploy_key
           chmod 600 ~/.ssh/deploy_key
           printf '%s\n' "$VPS_KNOWN_HOSTS" > ~/.ssh/known_hosts
           chmod 600 ~/.ssh/known_hosts
-          test -s ~/.ssh/known_hosts
-      - name: Deploy and health-gate
+          test -n "$VPS_HOST"
+          ssh-keygen -F "$VPS_HOST" -f ~/.ssh/known_hosts >/dev/null
+      - name: Deploy exact image and run sustained health gate
+        id: rollout
         env:
           VPS_HOST: ${{ secrets.VPS_HOST }}
           VPS_USER: ${{ secrets.VPS_USER }}
           GHCR_USERNAME: ${{ github.actor }}
           GHCR_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          DEPLOY_IMAGE: ${{ steps.release.outputs.image }}
+          DEPLOY_IMAGE: ${{ needs.deploy-preflight.outputs.release_image }}
+          DEPLOY_HEALTH_URL: ${{ vars.BACKEND_HEALTH_URL }}
+          DEPLOY_COMPOSE_FILES: ${{ vars.BACKEND_COMPOSE_FILES }}
+          DEPLOY_SERVICE: ${{ vars.BACKEND_COMPOSE_SERVICE }}
+          DEPLOY_IMAGE_VARIABLE: ${{ vars.BACKEND_IMAGE_VARIABLE }}
+          ROLLOUT_ID: ${{ github.run_id }}-${{ github.run_attempt }}
         run: |
           set -euo pipefail
-          remote_env=$(printf 'DEPLOY_IMAGE=%q IMAGE_VARIABLE=%q SERVICE=%q HEALTH_URL=%q COMPOSE_FILES=%q GHCR_USERNAME=%q' "$DEPLOY_IMAGE" BACKEND_IMAGE backend https://api.panyakorn.com/api/ready 'docker-compose.yml docker-compose.ai-skills.yml docker-compose.studio.yml' "$GHCR_USERNAME")
+          deploy_log="$RUNNER_TEMP/deploy-output.log"
+          : > "$deploy_log"
+          echo "log_file=$deploy_log" >> "$GITHUB_OUTPUT"
+          remote_env=$(printf 'DEPLOY_IMAGE=%q IMAGE_VARIABLE=%q SERVICE=%q HEALTH_URL=%q COMPOSE_FILES=%q GHCR_USERNAME=%q ROLLOUT_ID=%q' \
+            "$DEPLOY_IMAGE" "$DEPLOY_IMAGE_VARIABLE" "$DEPLOY_SERVICE" "$DEPLOY_HEALTH_URL" "$DEPLOY_COMPOSE_FILES" "$GHCR_USERNAME" "$ROLLOUT_ID")
           for attempt in 1 2 3; do
-            if { printf '%s\n' "$GHCR_TOKEN"; cat deploy/deploy-compose-service.sh; } | ssh -i ~/.ssh/deploy_key -o BatchMode=yes -o StrictHostKeyChecking=yes -o ConnectTimeout=60 -o ServerAliveInterval=15 -o ServerAliveCountMax=4 "${VPS_USER}@${VPS_HOST}" "IFS= read -r GHCR_TOKEN; export GHCR_TOKEN; ${remote_env} bash -se"; then
+            set +e
+            { printf '%s\n' "$GHCR_TOKEN"; cat deploy/deploy-compose-service.sh; } | \
+              ssh -i ~/.ssh/deploy_key \
+                -o BatchMode=yes \
+                -o StrictHostKeyChecking=yes \
+                -o ConnectTimeout=60 \
+                -o ServerAliveInterval=15 \
+                -o ServerAliveCountMax=4 \
+                "${VPS_USER}@${VPS_HOST}" \
+                "IFS= read -r GHCR_TOKEN; export GHCR_TOKEN; ${remote_env} bash -se" 2>&1 | tee -a "$deploy_log"
+            pipeline_status=("${PIPESTATUS[@]}")
+            set -e
+            ssh_status="${pipeline_status[1]}"
+            if [ "$ssh_status" -eq 0 ]; then
               exit 0
             fi
-            echo "SSH deployment attempt ${attempt}/3 failed" >&2
-            sleep 15
+            if [ "$ssh_status" -ne 255 ]; then
+              echo "Remote rollout failed with status $ssh_status; not retrying an application failure" >&2
+              exit "$ssh_status"
+            fi
+            echo "SSH transport attempt ${attempt}/3 failed; reconciling durable remote state" >&2
+            set +e
+            bash .github/scripts/reconcile-rollout.sh | tee -a "$deploy_log"
+            reconcile_status="${PIPESTATUS[0]}"
+            set -e
+            case "$reconcile_status" in
+              0) exit 0 ;;
+              10)
+                echo "Remote rollout never started; retry is safe" >&2
+                [ "$attempt" -lt 3 ] && sleep 15
+                ;;
+              *)
+                echo "Remote rollout state is failed or ambiguous; refusing to replay" >&2
+                exit 1
+                ;;
+            esac
           done
           exit 1
+      - name: Notify deployment success
+        if: success()
+        env:
+          DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
+          DEPLOY_IMAGE: ${{ needs.deploy-preflight.outputs.release_image }}
+          PREVIOUS_IMAGE: ${{ needs.deploy-preflight.outputs.previous_image }}
+        run: bash .github/scripts/notify-deploy.sh success
+      - name: Notify deployment failure and rollback result
+        if: failure()
+        env:
+          DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
+          DEPLOY_IMAGE: ${{ needs.deploy-preflight.outputs.release_image }}
+          PREVIOUS_IMAGE: ${{ needs.deploy-preflight.outputs.previous_image }}
+          DEPLOY_LOG_FILE: ${{ steps.rollout.outputs.log_file }}
+        run: bash .github/scripts/notify-deploy.sh failure
+      - name: Post-deployment summary
+        if: always()
+        env:
+          DEPLOY_STATUS: ${{ job.status }}
+          DEPLOY_IMAGE: ${{ needs.deploy-preflight.outputs.release_image }}
+          PREVIOUS_IMAGE: ${{ needs.deploy-preflight.outputs.previous_image }}
+          MIGRATIONS: ${{ needs.deploy-preflight.outputs.migrations }}
+        run: |
+          {
+            echo "## Rollout result"
+            echo
+            echo "| Signal | Value |"
+            echo "|---|---|"
+            echo "| Status | $DEPLOY_STATUS |"
+            echo "| Release image | \`$DEPLOY_IMAGE\` |"
+            echo "| Previous image | \`${PREVIOUS_IMAGE:-none}\` |"
+            echo "| Migrations | \`${MIGRATIONS:-none}\` |"
+            echo "| Sustained gate | immediate + short-term + medium-term |"
+            echo
+            echo "Post-deployment follow-up: review error rates, latency, container restarts, and business-critical API behavior at 1h and 24h."
+          } >> "$GITHUB_STEP_SUMMARY"

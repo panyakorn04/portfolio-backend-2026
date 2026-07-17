@@ -4,6 +4,14 @@
 /createuser
 *.exe
 
+# Go files not needed by the production build
+**/*_test.go
+/cmd
+/migrations
+/portfolio.api
+/Makefile
+/.golangci.yml
+
 # Env & secrets
 .env
 .env.local
@@ -15,6 +23,7 @@
 .gitignore
 .agents
 skills-lock.json
+/deploy
 
 # Docs & local-only files
 README.md

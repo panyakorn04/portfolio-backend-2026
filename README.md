@@ -60,7 +60,7 @@ portfolio-2026              ai-workflow-studio             open-webui-theme
                                      │
                                      ▼
                          portfolio-backend-2026
-                         Go 1.23 + go-zero REST
+                         Go 1.26.5 + go-zero REST
                           │         │          │
                           │         │          └── Ollama
                           │         │              local models
@@ -78,7 +78,7 @@ The service does not open a direct PostgreSQL connection. All runtime persistenc
 
 | Layer | Technology |
 | --- | --- |
-| Language | Go 1.23 |
+| Language | Go 1.26.5 |
 | HTTP framework | go-zero `rest` |
 | Persistence | Supabase REST/PostgREST |
 | Cache and distributed limits | Redis 7 via `go-redis/v9` |
@@ -125,7 +125,7 @@ The repository also contains project-specific agent skills under `.agents/skills
 
 ## Prerequisites
 
-- Go 1.23+
+- Go 1.26.5+
 - A Supabase project
 - Docker and Docker Compose for container-based development
 - Redis is optional for direct local runs and included by the local Compose stack
@@ -399,13 +399,14 @@ The default TTL is five minutes. Redis failures are non-fatal for article reads;
 - `bash -n` for deployment and image-smoke scripts
 - `golangci-lint` v2.12.2 with its native v2 configuration
 - Docker Buildx `linux/amd64` image build with a reusable GitHub Actions cache
+- Trivy fail-closed scanning for fixed high/critical OS and Go dependency vulnerabilities
 - Exact-image Docker health check plus an external `/api/health` HTTP probe before deployment
 
 Stale runs are cancelled per pull-request ref, while runs on the same `main` or manual-dispatch ref remain serialized. Third-party actions are pinned to immutable commit SHAs and use Node 24-compatible releases.
 
 ### Immutable release flow
 
-For non-PR runs, the image is published only as:
+For non-PR runs, the image is built and loaded locally, scanned, and smoke-tested before it is published only as:
 
 ```text
 ghcr.io/panyakorn04/portfolio-backend-2026:<full-commit-sha>
@@ -413,14 +414,18 @@ ghcr.io/panyakorn04/portfolio-backend-2026:<full-commit-sha>
 
 There is no mutable `latest` deployment tag. Production deploys select the exact commit image, authenticate to GHCR with the short-lived repository `GITHUB_TOKEN`, and remove the temporary Docker credential directory afterward.
 
+Before the protected `production` approval, rollout preflight verifies the safe deployment window, immutable release image, pullable previous successful image, required repository assets, and migration state. Pushes that add migrations stop before approval; after applying and verifying those migrations manually, rerun with `migration_verified` enabled. Approved emergency or rollback dispatches can bypass the normal deployment window explicitly.
+
 The versioned deploy script:
 
 1. Acquires `/opt/apps/.production-deploy.lock`.
 2. Preserves the existing `/opt/apps/.env` and updates only `BACKEND_IMAGE`.
 3. Validates the Compose stack.
-4. Pulls and starts only the `backend` service.
-5. Gates success on `https://api.panyakorn.com/api/ready`, which returns an error unless the live Studio persistence tables can be queried.
-6. Restores the prior image automatically if deployment or health verification fails.
+4. Verifies that the previous release is still pullable before changing production.
+5. Pulls and force-recreates only the `backend` service, then confirms that the running container uses the requested immutable image.
+6. Gates success on immediate, short-term, and medium-term checks of `https://api.panyakorn.com/api/ready`, including a latency threshold. The endpoint returns an error unless the live Studio persistence tables can be queried.
+7. Restores, force-recreates, and verifies the prior image automatically if deployment or sustained health verification fails.
+8. Records durable rollout state on the VPS so an SSH disconnect is reconciled before CI decides whether a retry is safe; an ambiguous in-progress transaction is never replayed blindly.
 
 Deployment uses these externally provisioned Compose files:
 
@@ -441,7 +446,22 @@ VPS_SSH_KEY
 VPS_KNOWN_HOSTS
 ```
 
+`DISCORD_WEBHOOK_URL` is optional; when configured, the deployment sends start, success, failure, and rollback-result notifications. A GitHub job summary is always written even when no webhook is configured.
+
 `VPS_KNOWN_HOSTS` must contain pinned OpenSSH `known_hosts` line(s), not only a fingerprint. The workflow does not sync application secrets from GitHub; production runtime variables remain in `/opt/apps/.env` and must retain least-privilege file permissions.
+
+### Required GitHub Actions variables
+
+```text
+BACKEND_IMAGE_REPOSITORY
+BACKEND_HEALTH_URL
+BACKEND_COMPOSE_FILES
+BACKEND_COMPOSE_SERVICE
+BACKEND_IMAGE_VARIABLE
+DEPLOY_TIMEZONE
+```
+
+These operational values are configured in repository Settings rather than hardcoded into the workflow.
 
 ### Manual rollback
 
