@@ -23,7 +23,7 @@ This repo ships project skills in `.agents/skills/`. Activate them proactively w
 - **golang-observability** — logging, metrics, tracing, OpenTelemetry
 - **golang-cli** — cobra, flags, argument parsing
 - **golang-dependency-injection** — wire, dig, fx patterns
-- **golang-modernize** — modern Go idioms, go1.23 features
+- **golang-modernize** — modern Go idioms and current language features
 - **golang-design-patterns** — common Go design patterns
 - **golang-refactoring** — code transformation, restructuring
 - **golang-safety** — memory safety, nil checks, race detection
@@ -62,7 +62,7 @@ This repo ships project skills in `.agents/skills/`. Activate them proactively w
 
 ## Stack notes
 
-- Go 1.23 with go-zero `rest` framework (no zRPC)
+- Go 1.26.5 with go-zero `rest` framework (no zRPC)
 - All persistence goes through Supabase REST/PostgREST — never direct SQL
 - Admin auth uses bcrypt passwords, SHA-256 session tokens, and optional bearer tokens
 - Rate limiting uses Redis when available, falls back to in-memory counters
