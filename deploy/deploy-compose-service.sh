@@ -21,12 +21,24 @@ ROLLBACK_ATTEMPTS="${ROLLBACK_ATTEMPTS:-10}"
 ROLLBACK_DELAY="${ROLLBACK_DELAY:-3}"
 HEALTH_TIMEOUT="${HEALTH_TIMEOUT:-10}"
 HEALTH_LATENCY_LIMIT="${HEALTH_LATENCY_LIMIT:-5}"
+ROLLOUT_ID="${ROLLOUT_ID:-manual-$$}"
+[[ "$ROLLOUT_ID" =~ ^[A-Za-z0-9._-]+$ ]] || { echo "ROLLOUT_ID contains unsupported characters" >&2; exit 1; }
 
 cd "$APPS_DIR"
 [ -f "$ENV_FILE" ] || touch "$ENV_FILE"
 # GitHub concurrency is repository-scoped; serialize all repositories on the VPS.
 exec 9>"$APPS_DIR/.production-deploy.lock"
 flock -w 600 9 || { echo "Timed out waiting for the production deployment lock" >&2; exit 1; }
+status_file="$APPS_DIR/.${SERVICE}-rollout-${ROLLOUT_ID}.status"
+
+set_rollout_status() {
+  local status="$1" image="${2:-}" tmp
+  tmp="$(mktemp "${status_file}.XXXXXX")"
+  printf 'ROLLOUT_STATUS=%s IMAGE=%s ROLLOUT_ID=%s\n' "$status" "$image" "$ROLLOUT_ID" > "$tmp"
+  chmod 600 "$tmp"
+  mv "$tmp" "$status_file"
+}
+set_rollout_status started "$DEPLOY_IMAGE"
 
 compose_args=()
 for file in $COMPOSE_FILES; do
@@ -44,23 +56,29 @@ trap cleanup EXIT
 printf '%s\n' "$GHCR_TOKEN" | docker login "$registry" --username "$GHCR_USERNAME" --password-stdin
 unset GHCR_TOKEN
 
-previous_image="$(awk -F= -v key="$IMAGE_VARIABLE" '$1 == key {sub(/^[^=]*=/, ""); print; exit}' "$ENV_FILE")"
+previous_image=""
+container_id="$(docker compose "${compose_args[@]}" ps -q "$SERVICE" 2>/dev/null || true)"
+if [ -n "$container_id" ]; then
+  previous_image="$(docker inspect --format='{{.Config.Image}}' "$container_id" 2>/dev/null || true)"
+fi
 if [ -z "$previous_image" ]; then
-  container_id="$(docker compose "${compose_args[@]}" ps -q "$SERVICE" 2>/dev/null || true)"
-  if [ -n "$container_id" ]; then
-    previous_image="$(docker inspect --format='{{.Config.Image}}' "$container_id" 2>/dev/null || true)"
-  fi
+  previous_image="$(awk -F= -v key="$IMAGE_VARIABLE" '$1 == key {sub(/^[^=]*=/, ""); print; exit}' "$ENV_FILE")"
 fi
 
 # Fail before touching production when the rollback artifact is unavailable.
 if [ -n "$previous_image" ]; then
   echo "Verifying rollback image is pullable: $previous_image"
-  docker pull "$previous_image" >/dev/null
+  if ! docker pull "$previous_image" >/dev/null; then
+    set_rollout_status rollback_image_unavailable "$previous_image"
+    echo "DEPLOY_ABORTED=rollback-image-unavailable" >&2
+    exit 1
+  fi
   echo "ROLLBACK_WORTHINESS=verified"
 else
   echo "No previous image was discoverable; this deployment has no image rollback path" >&2
   echo "ROLLBACK_WORTHINESS=unavailable"
 fi
+set_rollout_status preflight_passed "$previous_image"
 
 set_image() {
   local image="$1" tmp
@@ -129,6 +147,7 @@ monitor_sustained() {
 rollback() {
   local status=$?
   trap - ERR
+  set_rollout_status rollback_started "$previous_image"
   echo "Deployment failed (status $status); restoring previous release" >&2
   if [ -n "$previous_image" ]; then
     set_image "$previous_image"
@@ -137,14 +156,17 @@ rollback() {
        docker compose "${compose_args[@]}" up -d --no-deps --force-recreate "$SERVICE" && \
        verify_running_image "$previous_image" && \
        wait_until_healthy "rollback" "$ROLLBACK_ATTEMPTS" "$ROLLBACK_DELAY"; then
+      set_rollout_status rollback_success "$previous_image"
       echo "ROLLBACK_RESULT=success"
       echo "Automatic rollback succeeded: $previous_image" >&2
     else
+      set_rollout_status rollback_failure "$previous_image"
       echo "ROLLBACK_RESULT=failure"
       echo "Automatic rollback health or exact-image verification failed" >&2
     fi
   else
     cp "$env_backup" "$ENV_FILE"
+    set_rollout_status rollback_unavailable ""
     echo "ROLLBACK_RESULT=unavailable"
     echo "No previous image was discoverable; restored .env only" >&2
   fi
@@ -152,14 +174,19 @@ rollback() {
 }
 trap rollback ERR
 
+set_rollout_status deploying "$DEPLOY_IMAGE"
 set_image "$DEPLOY_IMAGE"
 docker compose "${compose_args[@]}" config --quiet
 docker compose "${compose_args[@]}" pull "$SERVICE"
 docker compose "${compose_args[@]}" up -d --no-deps --force-recreate "$SERVICE"
 verify_running_image "$DEPLOY_IMAGE"
+set_rollout_status image_verified "$DEPLOY_IMAGE"
 wait_until_healthy "immediate" "$IMMEDIATE_ATTEMPTS" "$IMMEDIATE_DELAY"
+set_rollout_status immediate_passed "$DEPLOY_IMAGE"
+set_rollout_status sustained_monitoring "$DEPLOY_IMAGE"
 monitor_sustained
 trap - ERR
 printf '%s\n' "$DEPLOY_IMAGE" > "$APPS_DIR/.${SERVICE}-last-successful-image"
+set_rollout_status success "$DEPLOY_IMAGE"
 echo "SUSTAINED_MONITORING=passed"
 echo "Deployment healthy and sustained monitoring passed: $DEPLOY_IMAGE"

@@ -406,7 +406,7 @@ Stale runs are cancelled per pull-request ref, while runs on the same `main` or 
 
 ### Immutable release flow
 
-For non-PR runs, the image is published only as:
+For non-PR runs, the image is built and loaded locally, scanned, and smoke-tested before it is published only as:
 
 ```text
 ghcr.io/panyakorn04/portfolio-backend-2026:<full-commit-sha>
@@ -425,6 +425,7 @@ The versioned deploy script:
 5. Pulls and force-recreates only the `backend` service, then confirms that the running container uses the requested immutable image.
 6. Gates success on immediate, short-term, and medium-term checks of `https://api.panyakorn.com/api/ready`, including a latency threshold. The endpoint returns an error unless the live Studio persistence tables can be queried.
 7. Restores, force-recreates, and verifies the prior image automatically if deployment or sustained health verification fails.
+8. Records durable rollout state on the VPS so an SSH disconnect is reconciled before CI decides whether a retry is safe; an ambiguous in-progress transaction is never replayed blindly.
 
 Deployment uses these externally provisioned Compose files:
 

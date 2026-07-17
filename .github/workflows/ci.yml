@@ -59,6 +59,7 @@ jobs:
           deploy/deploy-compose-service.sh
           .github/scripts/smoke-test-image.sh
           .github/scripts/deploy-preflight.sh
+          .github/scripts/reconcile-rollout.sh
           .github/scripts/notify-deploy.sh
 
   lint:
@@ -102,8 +103,8 @@ jobs:
         with:
           context: .
           platforms: linux/amd64
-          load: ${{ github.event_name == 'pull_request' }}
-          push: ${{ github.event_name != 'pull_request' }}
+          load: true
+          push: false
           tags: ${{ env.IMAGE_REPOSITORY }}:${{ github.sha }}
           labels: |
             org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
@@ -122,6 +123,19 @@ jobs:
           severity: CRITICAL,HIGH
       - name: Smoke test exact image
         run: bash .github/scripts/smoke-test-image.sh "${IMAGE_REPOSITORY}:${GITHUB_SHA}"
+      - name: Publish verified image
+        if: github.event_name != 'pull_request'
+        uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a # v7.3.0
+        with:
+          context: .
+          platforms: linux/amd64
+          push: true
+          tags: ${{ env.IMAGE_REPOSITORY }}:${{ github.sha }}
+          labels: |
+            org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
+            org.opencontainers.image.revision=${{ github.sha }}
+            org.opencontainers.image.title=portfolio-backend-2026
+          cache-from: type=gha
 
   deploy-preflight:
     if: >-
@@ -151,7 +165,8 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           ACTION: ${{ inputs.action }}
-          RELEASE_SHA: ${{ inputs.action == 'rollback' && inputs.image_sha || github.sha }}
+          RELEASE_SHA: ${{ github.sha }}
+          REQUESTED_IMAGE_SHA: ${{ inputs.image_sha }}
           BEFORE_SHA: ${{ github.event.before }}
           MIGRATION_VERIFIED: ${{ inputs.migration_verified }}
           EMERGENCY_OVERRIDE: ${{ inputs.emergency_override }}
@@ -209,13 +224,14 @@ jobs:
           DEPLOY_COMPOSE_FILES: ${{ vars.BACKEND_COMPOSE_FILES }}
           DEPLOY_SERVICE: ${{ vars.BACKEND_COMPOSE_SERVICE }}
           DEPLOY_IMAGE_VARIABLE: ${{ vars.BACKEND_IMAGE_VARIABLE }}
+          ROLLOUT_ID: ${{ github.run_id }}-${{ github.run_attempt }}
         run: |
           set -euo pipefail
           deploy_log="$RUNNER_TEMP/deploy-output.log"
           : > "$deploy_log"
           echo "log_file=$deploy_log" >> "$GITHUB_OUTPUT"
-          remote_env=$(printf 'DEPLOY_IMAGE=%q IMAGE_VARIABLE=%q SERVICE=%q HEALTH_URL=%q COMPOSE_FILES=%q GHCR_USERNAME=%q' \
-            "$DEPLOY_IMAGE" "$DEPLOY_IMAGE_VARIABLE" "$DEPLOY_SERVICE" "$DEPLOY_HEALTH_URL" "$DEPLOY_COMPOSE_FILES" "$GHCR_USERNAME")
+          remote_env=$(printf 'DEPLOY_IMAGE=%q IMAGE_VARIABLE=%q SERVICE=%q HEALTH_URL=%q COMPOSE_FILES=%q GHCR_USERNAME=%q ROLLOUT_ID=%q' \
+            "$DEPLOY_IMAGE" "$DEPLOY_IMAGE_VARIABLE" "$DEPLOY_SERVICE" "$DEPLOY_HEALTH_URL" "$DEPLOY_COMPOSE_FILES" "$GHCR_USERNAME" "$ROLLOUT_ID")
           for attempt in 1 2 3; do
             set +e
             { printf '%s\n' "$GHCR_TOKEN"; cat deploy/deploy-compose-service.sh; } | \
@@ -237,8 +253,22 @@ jobs:
               echo "Remote rollout failed with status $ssh_status; not retrying an application failure" >&2
               exit "$ssh_status"
             fi
-            echo "SSH transport attempt ${attempt}/3 failed" >&2
-            [ "$attempt" -lt 3 ] && sleep 15
+            echo "SSH transport attempt ${attempt}/3 failed; reconciling durable remote state" >&2
+            set +e
+            bash .github/scripts/reconcile-rollout.sh | tee -a "$deploy_log"
+            reconcile_status="${PIPESTATUS[0]}"
+            set -e
+            case "$reconcile_status" in
+              0) exit 0 ;;
+              10)
+                echo "Remote rollout never started; retry is safe" >&2
+                [ "$attempt" -lt 3 ] && sleep 15
+                ;;
+              *)
+                echo "Remote rollout state is failed or ambiguous; refusing to replay" >&2
+                exit 1
+                ;;
+            esac
           done
           exit 1
       - name: Notify deployment success

@@ -15,12 +15,21 @@ DEPLOY_TIMEZONE="${DEPLOY_TIMEZONE:-Asia/Bangkok}"
 EMERGENCY_OVERRIDE="${EMERGENCY_OVERRIDE:-false}"
 MIGRATION_VERIFIED="${MIGRATION_VERIFIED:-false}"
 BEFORE_SHA="${BEFORE_SHA:-}"
+REQUESTED_IMAGE_SHA="${REQUESTED_IMAGE_SHA:-}"
+
+if [ "$ACTION" = rollback ]; then
+  RELEASE_SHA="$REQUESTED_IMAGE_SHA"
+else
+  RELEASE_SHA="${RELEASE_SHA:-$GITHUB_SHA}"
+fi
+[[ "$RELEASE_SHA" =~ ^[0-9a-f]{40}$ ]] || { echo "Release SHA must be a full lowercase 40-character commit SHA" >&2; exit 1; }
 
 required_assets=(
   Dockerfile
   .dockerignore
   deploy/deploy-compose-service.sh
   .github/scripts/smoke-test-image.sh
+  .github/scripts/reconcile-rollout.sh
   .github/scripts/notify-deploy.sh
 )
 for asset in "${required_assets[@]}"; do
@@ -46,8 +55,6 @@ http_code="$(curl --silent --show-error --output /dev/null --write-out '%{http_c
 echo "GHCR reachable (HTTP $http_code)"
 
 printf '%s\n' "$GH_TOKEN" | docker login ghcr.io --username "$GITHUB_ACTOR" --password-stdin >/dev/null
-RELEASE_SHA="${RELEASE_SHA:-$GITHUB_SHA}"
-[[ "$RELEASE_SHA" =~ ^[0-9a-f]{40}$ ]] || { echo "Release SHA must be a full lowercase 40-character commit SHA" >&2; exit 1; }
 current_image="${IMAGE_REPOSITORY}:${RELEASE_SHA}"
 docker manifest inspect "$current_image" >/dev/null
 echo "Release image exists: $current_image"
@@ -80,9 +87,10 @@ if [ "$ACTION" != rollback ]; then
   if ! [[ "$base_sha" =~ ^[0-9a-f]{40}$ ]] || [[ "$base_sha" =~ ^0+$ ]] || ! git cat-file -e "${base_sha}^{commit}" 2>/dev/null; then
     base_sha="$previous_sha"
   fi
-  if [ -n "$base_sha" ]; then
-    migrations="$(git diff --name-only "$base_sha" "$GITHUB_SHA" -- 'migrations/*.sql' | paste -sd, -)"
+  if [ -z "$base_sha" ]; then
+    base_sha="$(git hash-object -t tree /dev/null)"
   fi
+  migrations="$(git diff --name-only "$base_sha" "$GITHUB_SHA" -- 'migrations/*.sql' | paste -sd, -)"
   if [ -n "$migrations" ] && [ "$MIGRATION_VERIFIED" != true ]; then
     {
       echo "## Production rollout preflight: NO-GO"
