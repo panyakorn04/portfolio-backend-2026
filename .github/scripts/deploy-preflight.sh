@@ -46,8 +46,7 @@ if [ "$ACTION" != rollback ] && [ "$EMERGENCY_OVERRIDE" != true ]; then
   if [ "$day" -eq 1 ] && [ "$hour" -lt 8 ]; then window_ok=false; fi
 fi
 if [ "$window_ok" != true ]; then
-  echo "Deployment blocked outside the safe window; use an approved workflow_dispatch emergency override if required" >&2
-  exit 1
+  echo "Deployment is a controlled NO-GO outside the safe window; production will remain unchanged"
 fi
 
 http_code="$(curl --silent --show-error --output /dev/null --write-out '%{http_code}' --max-time 10 https://ghcr.io/v2/ || true)"
@@ -114,8 +113,13 @@ fi
   echo "window_ok=$window_ok"
 } >> "$GITHUB_OUTPUT"
 
+decision="GO"
+if [ "$window_ok" != true ]; then
+  decision="NO-GO (deployment window)"
+fi
+
 {
-  echo "## Production rollout preflight: GO"
+  echo "## Production rollout preflight: $decision"
   echo
   echo "| Check | Result |"
   echo "|---|---|"
