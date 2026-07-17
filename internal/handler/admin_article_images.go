@@ -129,7 +129,9 @@ func AdminUploadArticleImageHandler(service *svc.ServiceContext) http.HandlerFun
 			return
 		}
 		if r.MultipartForm != nil {
-			defer r.MultipartForm.RemoveAll()
+			defer func() {
+				_ = r.MultipartForm.RemoveAll()
+			}()
 		}
 
 		file, _, err := r.FormFile("image")
