@@ -194,6 +194,9 @@ service portfolio-api {
 	@handler deleteArticle
 	delete /api/admin/articles/:id
 
+	@handler uploadArticleImage
+	post /api/admin/article-images
+
 	@handler listStudioWorkflows
 	get /api/admin/studio/workflows
 

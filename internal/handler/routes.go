@@ -110,6 +110,7 @@ func RegisterHandlers(server *rest.Server, svcCtx *svc.ServiceContext) {
 		{Method: http.MethodGet, Path: "/api/admin/articles/:id", Handler: AdminGetArticleHandler(svcCtx)},
 		{Method: http.MethodPatch, Path: "/api/admin/articles/:id", Handler: AdminUpdateArticleHandler(svcCtx)},
 		{Method: http.MethodDelete, Path: "/api/admin/articles/:id", Handler: AdminDeleteArticleHandler(svcCtx)},
+		{Method: http.MethodPost, Path: "/api/admin/article-images", Handler: AdminUploadArticleImageHandler(svcCtx)},
 
 		// AI + jobs
 		{Method: http.MethodPost, Path: "/api/ai/chat", Handler: AiChatHandler(svcCtx)},

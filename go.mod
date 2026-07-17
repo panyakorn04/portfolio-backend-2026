@@ -6,6 +6,7 @@ require (
 	github.com/redis/go-redis/v9 v9.7.0
 	github.com/zeromicro/go-zero v1.7.3
 	golang.org/x/crypto v0.28.0
+	golang.org/x/image v0.21.0
 )
 
 require (

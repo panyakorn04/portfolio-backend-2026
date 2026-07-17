@@ -13,6 +13,7 @@ type ServiceContext struct {
 	Config config.Config
 
 	Supabase     *model.SupabaseREST
+	Storage      *model.SupabaseStorage
 	ArticleCache *cache.RedisCache
 
 	Users                  *model.UserModel
@@ -45,6 +46,7 @@ func NewServiceContext(c config.Config) (*ServiceContext, error) {
 	}
 
 	svc.Supabase = model.NewSupabaseREST(c.SupabaseURL, key)
+	svc.Storage = model.NewSupabaseStorage(c.SupabaseURL, c.SupabaseServiceRoleKey)
 	svc.SupabaseArticles = model.NewSupabaseArticleClient(c.SupabaseURL, key)
 	svc.Ollama = model.NewOllamaClient(c.OllamaBaseURL, c.OllamaModel)
 	svc.AISkills = model.NewAISkillProfileStore(c.AISkillsDir)
