@@ -18,6 +18,9 @@ COMPOSE_FILE="$OBSERVABILITY_DIR/docker-compose.yml"
 ENV_FILE="$OBSERVABILITY_DIR/.env"
 
 install -d -m 750 "$OBSERVABILITY_DIR"
+# The official Alloy image runs as UID/GID 473. Keep its state writable
+# without granting the collector root inside the container.
+install -d -o 473 -g 473 -m 750 "$OBSERVABILITY_DIR/data"
 install -m 644 "$STAGED_OBSERVABILITY_DIR/config.alloy" "$OBSERVABILITY_DIR/config.alloy"
 install -m 644 "$STAGED_OBSERVABILITY_DIR/docker-compose.yml" "$COMPOSE_FILE"
 
