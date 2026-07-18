@@ -409,7 +409,21 @@ Local inspection:
 docker compose logs -f api
 ```
 
-Production can ship the same stdout stream to Loki through Grafana Alloy without changing application code.
+Production ships the same stdout stream to Grafana Cloud Loki through Grafana Alloy. The deployment is defined in `observability/alloy/` and is installed with the manual `Deploy Grafana Alloy` workflow. Configure these repository secrets before dispatching it:
+
+```text
+GRAFANA_LOKI_URL       # HTTPS endpoint ending in /loki/api/v1/push
+GRAFANA_LOKI_USERNAME  # Grafana Cloud hosted-logs instance ID
+GRAFANA_LOKI_TOKEN     # access-policy token with logs:write and logs:read
+```
+
+The workflow transfers credentials over pinned SSH stdin, stores the production Alloy environment file with mode `0600`, starts a digest-pinned Alloy v1.17.1 container, probes the local Alloy readiness endpoint, emits a unique backend request ID, and queries Loki until that exact sanitized event is visible. Alloy reads only the `api`/`backend` Docker Compose services and assigns bounded `application="portfolio-api"` and `environment="production"` labels; request IDs remain inside log content and never become high-cardinality labels.
+
+Example Grafana Explore query:
+
+```logql
+{application="portfolio-api", environment="production"} | json
+```
 
 ## CI/CD and production deployment
 

@@ -57,6 +57,7 @@ jobs:
         run: >-
           bash -n
           deploy/deploy-compose-service.sh
+          deploy/install-grafana-alloy.sh
           .github/scripts/smoke-test-image.sh
           .github/scripts/deploy-preflight.sh
           .github/scripts/reconcile-rollout.sh
