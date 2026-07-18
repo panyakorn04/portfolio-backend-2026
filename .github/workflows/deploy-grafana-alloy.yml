@@ -66,19 +66,36 @@ jobs:
           set -euo pipefail
           remote_dir="/tmp/portfolio-grafana-alloy-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
           echo "REMOTE_DIR=$remote_dir" >> "$GITHUB_ENV"
-          ssh -i ~/.ssh/deploy_key \
-            -o BatchMode=yes \
-            -o StrictHostKeyChecking=yes \
-            -o ConnectTimeout=60 \
-            "${VPS_USER}@${VPS_HOST}" \
-            "install -d -m 700 '$remote_dir'"
-          scp -i ~/.ssh/deploy_key \
-            -o BatchMode=yes \
-            -o StrictHostKeyChecking=yes \
-            -o ConnectTimeout=60 \
-            observability/alloy/config.alloy \
-            observability/alloy/docker-compose.yml \
-            "${VPS_USER}@${VPS_HOST}:${remote_dir}/"
+          for attempt in 1 2 3; do
+            set +e
+            ssh -i ~/.ssh/deploy_key \
+              -o BatchMode=yes \
+              -o StrictHostKeyChecking=yes \
+              -o ConnectTimeout=60 \
+              "${VPS_USER}@${VPS_HOST}" \
+              "install -d -m 700 '$remote_dir'"
+            ssh_status=$?
+            if [ "$ssh_status" -eq 0 ]; then
+              scp -i ~/.ssh/deploy_key \
+                -o BatchMode=yes \
+                -o StrictHostKeyChecking=yes \
+                -o ConnectTimeout=60 \
+                observability/alloy/config.alloy \
+                observability/alloy/docker-compose.yml \
+                "${VPS_USER}@${VPS_HOST}:${remote_dir}/"
+              ssh_status=$?
+            fi
+            set -e
+            if [ "$ssh_status" -eq 0 ]; then
+              break
+            fi
+            if [ "$ssh_status" -ne 255 ] || [ "$attempt" -eq 3 ]; then
+              echo "Alloy asset staging failed with status $ssh_status" >&2
+              exit "$ssh_status"
+            fi
+            echo "SSH transport attempt ${attempt}/3 failed while staging; retrying" >&2
+            sleep 15
+          done
 
       - name: Install Grafana Alloy
         env:
