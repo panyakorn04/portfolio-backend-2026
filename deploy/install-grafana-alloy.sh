@@ -18,12 +18,6 @@ COMPOSE_FILE="$OBSERVABILITY_DIR/docker-compose.yml"
 ENV_FILE="$OBSERVABILITY_DIR/.env"
 
 install -d -m 750 "$OBSERVABILITY_DIR"
-# Docker may remap container UIDs. Keep the collector state directory writable
-# across rootful and rootless/userns-remapped daemons. The parent remains 0750,
-# and the sticky bit prevents one mapped UID from deleting another's files.
-# This directory stores Alloy runtime state only; credentials stay in .env.
-install -d -m 1777 "$OBSERVABILITY_DIR/data"
-chmod 1777 "$OBSERVABILITY_DIR/data"
 install -m 644 "$STAGED_OBSERVABILITY_DIR/config.alloy" "$OBSERVABILITY_DIR/config.alloy"
 install -m 644 "$STAGED_OBSERVABILITY_DIR/docker-compose.yml" "$COMPOSE_FILE"
 
