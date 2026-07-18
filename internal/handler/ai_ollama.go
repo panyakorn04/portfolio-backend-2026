@@ -2,12 +2,12 @@ package handler
 
 import (
 	"encoding/json"
-	"log"
 	"net/http"
 	"strings"
 	"time"
 
 	"portfolio-backend/internal/model"
+	"portfolio-backend/internal/observability"
 	"portfolio-backend/internal/response"
 	"portfolio-backend/internal/svc"
 )
@@ -53,7 +53,7 @@ func AiModelsHandler(svcCtx *svc.ServiceContext) http.HandlerFunc {
 
 		models, err := svcCtx.Ollama.ListModels(r.Context())
 		if err != nil {
-			log.Printf("ai models ollama error: %v", err)
+			observability.Error(r.Context(), "ollama.models.list_failed", "Ollama model listing failed", err)
 			response.Error(w, http.StatusBadGateway, "Unable to list Ollama models.")
 			return
 		}
@@ -69,7 +69,7 @@ func AiRunningModelsHandler(svcCtx *svc.ServiceContext) http.HandlerFunc {
 
 		models, err := svcCtx.Ollama.RunningModels(r.Context())
 		if err != nil {
-			log.Printf("ai running models ollama error: %v", err)
+			observability.Error(r.Context(), "ollama.models.running_failed", "Ollama running model listing failed", err)
 			response.Error(w, http.StatusBadGateway, "Unable to list running Ollama models.")
 			return
 		}
@@ -85,7 +85,7 @@ func AiVersionHandler(svcCtx *svc.ServiceContext) http.HandlerFunc {
 
 		version, err := svcCtx.Ollama.Version(r.Context())
 		if err != nil {
-			log.Printf("ai version ollama error: %v", err)
+			observability.Error(r.Context(), "ollama.version.failed", "Ollama version request failed", err)
 			response.Error(w, http.StatusBadGateway, "Unable to get Ollama version.")
 			return
 		}
@@ -118,7 +118,7 @@ func AiGenerateHandler(svcCtx *svc.ServiceContext) http.HandlerFunc {
 			Format: body.Format,
 		})
 		if err != nil {
-			log.Printf("ai generate ollama error: %v", err)
+			observability.Error(r.Context(), "ollama.generate.failed", "Ollama generation failed", err)
 			response.Error(w, http.StatusBadGateway, "Unable to generate a response from the AI model.")
 			return
 		}
@@ -147,7 +147,7 @@ func AiShowModelHandler(svcCtx *svc.ServiceContext) http.HandlerFunc {
 
 		result, err := svcCtx.Ollama.Show(r.Context(), model.OllamaShowRequest{Model: body.Model, Verbose: body.Verbose})
 		if err != nil {
-			log.Printf("ai show model ollama error: %v", err)
+			observability.Error(r.Context(), "ollama.model.show_failed", "Ollama model detail request failed", err)
 			response.Error(w, http.StatusBadGateway, "Unable to show Ollama model details.")
 			return
 		}
@@ -190,7 +190,7 @@ func AiEmbedHandler(svcCtx *svc.ServiceContext) http.HandlerFunc {
 			KeepAlive: body.KeepAlive,
 		})
 		if err != nil {
-			log.Printf("ai embed ollama error: %v", err)
+			observability.Error(r.Context(), "ollama.embed.failed", "Ollama embedding request failed", err)
 			response.Error(w, http.StatusBadGateway, "Unable to create embeddings from the AI model.")
 			return
 		}

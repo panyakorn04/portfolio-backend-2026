@@ -7,7 +7,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"log"
 	"math"
 	"net/http"
 	"sort"
@@ -17,6 +16,7 @@ import (
 
 	"portfolio-backend/internal/auth"
 	"portfolio-backend/internal/model"
+	"portfolio-backend/internal/observability"
 	"portfolio-backend/internal/response"
 	"portfolio-backend/internal/svc"
 )
@@ -111,7 +111,7 @@ func StudioOverviewHandler(svcCtx *svc.ServiceContext) http.HandlerFunc {
 		}
 		workflows, executions, err := svcCtx.Studio.Overview(r.Context())
 		if err != nil {
-			log.Printf("studio overview fallback: %v", err)
+			observability.Error(r.Context(), "studio.overview.fallback", "Studio overview persistence failed; using seeded fallback", err)
 			response.Ok(w, http.StatusOK, seededStudioOverview())
 			return
 		}
@@ -131,7 +131,7 @@ func StudioReadinessHandler(svcCtx *svc.ServiceContext) http.HandlerFunc {
 		ctx, cancel := context.WithTimeout(r.Context(), 5*time.Second)
 		defer cancel()
 		if err := svcCtx.Studio.Ready(ctx); err != nil {
-			log.Printf("studio readiness check failed: %v", err)
+			observability.Error(r.Context(), "studio.readiness.failed", "Studio readiness check failed", err)
 			response.Error(w, http.StatusServiceUnavailable, "Studio persistence is unavailable.")
 			return
 		}
@@ -623,7 +623,7 @@ func AdminExecuteStudioTriggerHandler(s *svc.ServiceContext) http.HandlerFunc {
 			Output: []map[string]map[string]any{{"json": jsonOutput}},
 		}
 		if _, err := s.Studio.CreateAudit(r.Context(), studioAuditInput(r, s, access, "node.execute", "workflow-node", nodeID, "", "completed")); err != nil {
-			log.Printf("studio trigger audit persistence failed: %v", err)
+			observability.Error(r.Context(), "studio.trigger.audit_failed", "Studio trigger audit persistence failed", err)
 			response.Error(w, http.StatusInternalServerError, "Node executed but its audit record could not be saved.")
 			return
 		}
@@ -751,7 +751,7 @@ func AdminExecuteStudioHttpRequestHandler(s *svc.ServiceContext) http.HandlerFun
 		}
 		resp, err := httpClient.Do(req)
 		if err != nil {
-			log.Printf("studio HTTP request failed workflow=%q node=%q host=%q error_type=%T", workflowID, nodeID, parsedURL.Hostname(), err)
+			observability.ErrorType(r.Context(), "studio.http_request.failed", "Studio HTTP request failed", err)
 			switch {
 			case errors.Is(err, errStudioHTTPDestinationBlocked):
 				response.Error(w, http.StatusBadRequest, errStudioHTTPDestinationBlocked.Error())
@@ -812,7 +812,7 @@ func AdminExecuteStudioHttpRequestHandler(s *svc.ServiceContext) http.HandlerFun
 		}
 
 		if _, err := s.Studio.CreateAudit(r.Context(), studioAuditInput(r, s, access, "node.execute", "workflow-node", nodeID, "", "completed")); err != nil {
-			log.Printf("studio http-request audit persistence failed: %v", err)
+			observability.Error(r.Context(), "studio.http_request.audit_failed", "Studio HTTP request audit persistence failed", err)
 		}
 		response.Ok(w, http.StatusOK, item)
 	}
@@ -858,7 +858,7 @@ func AdminCreateStudioExecutionHandler(s *svc.ServiceContext) http.HandlerFunc {
 			return
 		}
 		if _, err := s.Studio.CreateAudit(r.Context(), studioAuditInput(r, s, access, "execution.create", "execution", item.ID, "", item.Status)); err != nil {
-			log.Printf("studio audit persistence failed: %v", err)
+			observability.Error(r.Context(), "studio.audit.persistence_failed", "Studio audit persistence failed", err)
 			response.Error(w, 500, "Execution created but its audit record could not be saved.")
 			return
 		}
@@ -979,7 +979,7 @@ func studioWorkflowMutation(s *svc.ServiceContext, create bool) http.HandlerFunc
 			action = "workflow.create"
 		}
 		if _, err := s.Studio.CreateAudit(r.Context(), studioAuditInput(r, s, access, action, "workflow", item.ID, fromStatus, item.Status)); err != nil {
-			log.Printf("studio audit persistence failed: %v", err)
+			observability.Error(r.Context(), "studio.audit.persistence_failed", "Studio audit persistence failed", err)
 			response.Error(w, 500, "Workflow changed but its audit record could not be saved.")
 			return
 		}
@@ -1018,7 +1018,7 @@ func AdminStudioExecutionActionHandler(s *svc.ServiceContext, action string) htt
 			return
 		}
 		if _, err := s.Studio.CreateAudit(r.Context(), studioAuditInput(r, s, access, "execution."+action, "execution", item.ID, current.Status, item.Status)); err != nil {
-			log.Printf("studio audit persistence failed: %v", err)
+			observability.Error(r.Context(), "studio.audit.persistence_failed", "Studio audit persistence failed", err)
 			response.Error(w, 500, "Execution changed but its audit record could not be saved.")
 			return
 		}

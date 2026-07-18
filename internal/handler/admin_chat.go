@@ -1,12 +1,12 @@
 package handler
 
 import (
-	"log"
 	"net/http"
 	"strconv"
 	"strings"
 	"time"
 
+	"portfolio-backend/internal/observability"
 	"portfolio-backend/internal/response"
 	"portfolio-backend/internal/svc"
 )
@@ -74,7 +74,7 @@ func AdminListChatSessionsHandler(svcCtx *svc.ServiceContext) http.HandlerFunc {
 
 		sessions, total, err := svcCtx.PortfolioChatSessions.ListAll(r.Context(), statusFilter, limit, offset)
 		if err != nil {
-			log.Printf("admin list chat sessions error: %v", err)
+			observability.Error(r.Context(), "admin_chat.sessions.list_failed", "Admin chat session listing failed", err)
 			response.Error(w, http.StatusInternalServerError, "Unable to list chat sessions.")
 			return
 		}
@@ -122,7 +122,7 @@ func AdminGetChatSessionHandler(svcCtx *svc.ServiceContext) http.HandlerFunc {
 
 		session, err := svcCtx.PortfolioChatSessions.FindByID(r.Context(), sessionID)
 		if err != nil {
-			log.Printf("admin get chat session error: %v", err)
+			observability.Error(r.Context(), "admin_chat.session.lookup_failed", "Admin chat session lookup failed", err)
 			response.Error(w, http.StatusInternalServerError, "Unable to load chat session.")
 			return
 		}
@@ -133,7 +133,7 @@ func AdminGetChatSessionHandler(svcCtx *svc.ServiceContext) http.HandlerFunc {
 
 		messages, err := svcCtx.PortfolioChatMessages.ListForSession(r.Context(), sessionID, 0)
 		if err != nil {
-			log.Printf("admin get chat messages error: %v", err)
+			observability.Error(r.Context(), "admin_chat.messages.list_failed", "Admin chat message listing failed", err)
 			response.Error(w, http.StatusInternalServerError, "Unable to load chat messages.")
 			return
 		}
@@ -194,7 +194,7 @@ func AdminReplyChatSessionHandler(svcCtx *svc.ServiceContext) http.HandlerFunc {
 
 		session, err := svcCtx.PortfolioChatSessions.FindByID(r.Context(), sessionID)
 		if err != nil {
-			log.Printf("admin reply find session error: %v", err)
+			observability.Error(r.Context(), "admin_chat.reply.session_lookup_failed", "Admin chat reply session lookup failed", err)
 			response.Error(w, http.StatusInternalServerError, "Unable to load chat session.")
 			return
 		}
@@ -212,13 +212,13 @@ func AdminReplyChatSessionHandler(svcCtx *svc.ServiceContext) http.HandlerFunc {
 
 		if session.Status == "active" {
 			if err := svcCtx.PortfolioChatSessions.UpdateStatus(r.Context(), sessionID, "human"); err != nil {
-				log.Printf("admin reply update status error: %v", err)
+				observability.Error(r.Context(), "admin_chat.reply.status_update_failed", "Admin chat reply status update failed", err)
 			}
 		}
 
 		msg, err := svcCtx.PortfolioChatMessages.Append(r.Context(), sessionID, "assistant", "chat", message, meta)
 		if err != nil {
-			log.Printf("admin reply append message error: %v", err)
+			observability.Error(r.Context(), "admin_chat.reply.message_append_failed", "Admin chat reply persistence failed", err)
 			response.Error(w, http.StatusInternalServerError, "Unable to send reply.")
 			return
 		}
@@ -265,7 +265,7 @@ func AdminUpdateChatSessionHandler(svcCtx *svc.ServiceContext) http.HandlerFunc 
 		}
 
 		if err := svcCtx.PortfolioChatSessions.UpdateStatus(r.Context(), sessionID, payload.Status); err != nil {
-			log.Printf("admin update chat session status error: %v", err)
+			observability.Error(r.Context(), "admin_chat.session.status_update_failed", "Admin chat session status update failed", err)
 			response.Error(w, http.StatusInternalServerError, "Unable to update session status.")
 			return
 		}

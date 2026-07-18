@@ -7,12 +7,12 @@ import (
 	"encoding/base64"
 	"encoding/hex"
 	"fmt"
-	"log"
 	"net/http"
 	"strings"
 	"time"
 
 	"portfolio-backend/internal/model"
+	"portfolio-backend/internal/observability"
 	"portfolio-backend/internal/response"
 	"portfolio-backend/internal/svc"
 )
@@ -69,7 +69,7 @@ func PortfolioAssistantLatestSessionHandler(svcCtx *svc.ServiceContext) http.Han
 		now := time.Now().UTC()
 		session, err := svcCtx.PortfolioChatSessions.FindLatestActiveByVisitorHash(r.Context(), visitorHash, now)
 		if err != nil {
-			log.Printf("portfolio chat current session lookup error: %v", err)
+			observability.Error(r.Context(), "portfolio_chat.session.current_lookup_failed", "Portfolio chat current session lookup failed", err)
 			response.Error(w, http.StatusServiceUnavailable, "Unable to load chat session.")
 			return
 		}
@@ -80,7 +80,7 @@ func PortfolioAssistantLatestSessionHandler(svcCtx *svc.ServiceContext) http.Han
 
 		messages, err := svcCtx.PortfolioChatMessages.ListForSession(r.Context(), session.ID, portfolioChatMaxStoredMessages(svcCtx))
 		if err != nil {
-			log.Printf("portfolio chat messages lookup error: %v", err)
+			observability.Error(r.Context(), "portfolio_chat.messages.lookup_failed", "Portfolio chat message lookup failed", err)
 			response.Error(w, http.StatusServiceUnavailable, "Unable to load chat messages.")
 			return
 		}
@@ -112,7 +112,7 @@ func PortfolioAssistantNewSessionHandler(svcCtx *svc.ServiceContext) http.Handle
 
 		session, err := createPortfolioChatSession(r, svcCtx, visitorHash, &title, payload.Locale)
 		if err != nil {
-			log.Printf("portfolio chat session create error: %v", err)
+			observability.Error(r.Context(), "portfolio_chat.session.create_failed", "Portfolio chat session creation failed", err)
 			response.Error(w, http.StatusServiceUnavailable, "Unable to create chat session.")
 			return
 		}
@@ -140,7 +140,7 @@ func PortfolioAssistantRequestHumanHandler(svcCtx *svc.ServiceContext) http.Hand
 
 		session, err := svcCtx.PortfolioChatSessions.FindByIDForVisitorHash(r.Context(), sessionID, visitorHash, time.Now().UTC())
 		if err != nil {
-			log.Printf("portfolio chat request human find session error: %v", err)
+			observability.Error(r.Context(), "portfolio_chat.handoff.session_lookup_failed", "Portfolio chat handoff session lookup failed", err)
 			response.Error(w, http.StatusServiceUnavailable, "Unable to load chat session.")
 			return
 		}
@@ -150,13 +150,13 @@ func PortfolioAssistantRequestHumanHandler(svcCtx *svc.ServiceContext) http.Hand
 		}
 
 		if err := svcCtx.PortfolioChatSessions.UpdateStatus(r.Context(), sessionID, "pending_human"); err != nil {
-			log.Printf("portfolio chat request human update status error: %v", err)
+			observability.Error(r.Context(), "portfolio_chat.handoff.status_update_failed", "Portfolio chat handoff status update failed", err)
 			response.Error(w, http.StatusServiceUnavailable, "Unable to request human contact.")
 			return
 		}
 
 		if _, err := svcCtx.PortfolioChatMessages.Append(r.Context(), sessionID, "system", "request_human", "Visitor requested human contact", map[string]any{"source": "portfolio-widget"}); err != nil {
-			log.Printf("portfolio chat request human append message error: %v", err)
+			observability.Error(r.Context(), "portfolio_chat.handoff.message_append_failed", "Portfolio chat handoff message persistence failed", err)
 		}
 
 		response.Ok(w, http.StatusOK, map[string]any{"status": "pending_human"})
@@ -180,7 +180,7 @@ func PortfolioAssistantDeleteSessionHandler(svcCtx *svc.ServiceContext) http.Han
 			return
 		}
 		if err := svcCtx.PortfolioChatSessions.DeleteByIDForVisitorHash(r.Context(), sessionID, visitorHash); err != nil {
-			log.Printf("portfolio chat session delete error: %v", err)
+			observability.Error(r.Context(), "portfolio_chat.session.delete_failed", "Portfolio chat session deletion failed", err)
 			response.Error(w, http.StatusServiceUnavailable, "Unable to delete chat session.")
 			return
 		}

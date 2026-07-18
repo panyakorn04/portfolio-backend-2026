@@ -3,12 +3,12 @@ package handler
 import (
 	"encoding/json"
 	"fmt"
-	"log"
 	"net/http"
 	"strings"
 	"time"
 
 	"portfolio-backend/internal/model"
+	"portfolio-backend/internal/observability"
 	"portfolio-backend/internal/response"
 	"portfolio-backend/internal/svc"
 )
@@ -88,14 +88,14 @@ func aiChatHandlerForProfile(svcCtx *svc.ServiceContext, skillProfile string) ht
 
 		messages, err := messagesWithSkillProfile(svcCtx, skillProfile, body.Messages)
 		if err != nil {
-			log.Printf("ai chat skill profile error: %v", err)
+			observability.Error(r.Context(), "ai.chat.skill_profile_failed", "AI chat skill profile loading failed", err)
 			response.Error(w, http.StatusInternalServerError, "Unable to load AI skill context.")
 			return
 		}
 
 		chat, err := svcCtx.Ollama.ChatWithModel(r.Context(), selectedModel, messages)
 		if err != nil {
-			log.Printf("ai chat ollama error: %v", err)
+			observability.Error(r.Context(), "ai.chat.ollama_failed", "AI chat Ollama request failed", err)
 			response.Error(w, http.StatusBadGateway, "Unable to get a response from the AI model.")
 			return
 		}
@@ -162,7 +162,7 @@ func aiChatStreamHandlerForProfile(svcCtx *svc.ServiceContext, skillProfile stri
 			}
 			session, err := svcCtx.PortfolioChatSessions.FindByIDForVisitorHash(r.Context(), body.SessionID, visitorHash, time.Now().UTC())
 			if err != nil {
-				log.Printf("portfolio chat stream session lookup error: %v", err)
+				observability.Error(r.Context(), "portfolio_chat.stream.session_lookup_failed", "Portfolio chat stream session lookup failed", err)
 				response.Error(w, http.StatusServiceUnavailable, "Unable to load chat session.")
 				return
 			}
@@ -172,7 +172,7 @@ func aiChatStreamHandlerForProfile(svcCtx *svc.ServiceContext, skillProfile stri
 			}
 			storedMessages, err := svcCtx.PortfolioChatMessages.ListForSession(r.Context(), session.ID, maxAIChatMessages-1)
 			if err != nil {
-				log.Printf("portfolio chat stream messages lookup error: %v", err)
+				observability.Error(r.Context(), "portfolio_chat.stream.messages_lookup_failed", "Portfolio chat stream message lookup failed", err)
 				response.Error(w, http.StatusServiceUnavailable, "Unable to load chat messages.")
 				return
 			}
@@ -213,23 +213,23 @@ func aiChatStreamHandlerForProfile(svcCtx *svc.ServiceContext, skillProfile stri
 			"runId":     body.RunID,
 			"model":     modelName,
 		}); err != nil {
-			log.Printf("ai chat stream write error: %v", err)
+			observability.Error(r.Context(), "ai.chat.stream.write_failed", "AI chat stream write failed", err)
 			return
 		}
 		if err := writeAIStreamStage(w, flusher, body.ThreadID, body.RunID, modelName, "observing", "Understanding your question", "Reading the latest visitor message and session context."); err != nil {
-			log.Printf("ai chat stream write error: %v", err)
+			observability.Error(r.Context(), "ai.chat.stream.write_failed", "AI chat stream write failed", err)
 			return
 		}
 		if err := writeAIStreamStage(w, flusher, body.ThreadID, body.RunID, modelName, "classifying", "Detecting intent", "Checking whether the request is a public portfolio inquiry."); err != nil {
-			log.Printf("ai chat stream write error: %v", err)
+			observability.Error(r.Context(), "ai.chat.stream.write_failed", "AI chat stream write failed", err)
 			return
 		}
 		if err := writeAIStreamStage(w, flusher, body.ThreadID, body.RunID, modelName, "planning", "Planning a useful answer", "Selecting the safest response path for this portfolio assistant."); err != nil {
-			log.Printf("ai chat stream write error: %v", err)
+			observability.Error(r.Context(), "ai.chat.stream.write_failed", "AI chat stream write failed", err)
 			return
 		}
 		if err := writeAIStreamStage(w, flusher, body.ThreadID, body.RunID, modelName, "retrieving_context", "Checking public portfolio context", "Loading only the public-safe skill profile for this surface."); err != nil {
-			log.Printf("ai chat stream write error: %v", err)
+			observability.Error(r.Context(), "ai.chat.stream.write_failed", "AI chat stream write failed", err)
 			return
 		}
 
@@ -237,7 +237,7 @@ func aiChatStreamHandlerForProfile(svcCtx *svc.ServiceContext, skillProfile stri
 		var assistantContent strings.Builder
 		messages, err := messagesWithSkillProfile(svcCtx, skillProfile, streamMessages)
 		if err != nil {
-			log.Printf("ai chat stream skill profile error: %v", err)
+			observability.Error(r.Context(), "ai.chat.stream.skill_profile_failed", "AI chat stream skill profile loading failed", err)
 			_ = writeAIStreamEvent(w, flusher, map[string]any{
 				"type":      "RUN_ERROR",
 				"timestamp": time.Now().UnixMilli(),
@@ -251,7 +251,7 @@ func aiChatStreamHandlerForProfile(svcCtx *svc.ServiceContext, skillProfile stri
 		}
 
 		if err := writeAIStreamStage(w, flusher, body.ThreadID, body.RunID, modelName, "drafting", "Drafting the response", "Streaming an answer grounded in the allowed portfolio context."); err != nil {
-			log.Printf("ai chat stream write error: %v", err)
+			observability.Error(r.Context(), "ai.chat.stream.write_failed", "AI chat stream write failed", err)
 			return
 		}
 		if err := writeAIStreamEvent(w, flusher, map[string]any{
@@ -261,7 +261,7 @@ func aiChatStreamHandlerForProfile(svcCtx *svc.ServiceContext, skillProfile stri
 			"role":      "assistant",
 			"model":     modelName,
 		}); err != nil {
-			log.Printf("ai chat stream write error: %v", err)
+			observability.Error(r.Context(), "ai.chat.stream.write_failed", "AI chat stream write failed", err)
 			return
 		}
 
@@ -288,7 +288,7 @@ func aiChatStreamHandlerForProfile(svcCtx *svc.ServiceContext, skillProfile stri
 			return nil
 		})
 		if err != nil {
-			log.Printf("ai chat stream ollama error: %v", err)
+			observability.Error(r.Context(), "ai.chat.stream.ollama_failed", "AI chat stream Ollama request failed", err)
 			_ = writeAIStreamEvent(w, flusher, map[string]any{
 				"type":      "RUN_ERROR",
 				"timestamp": time.Now().UnixMilli(),
@@ -302,7 +302,7 @@ func aiChatStreamHandlerForProfile(svcCtx *svc.ServiceContext, skillProfile stri
 		}
 
 		if err := writeAIStreamStage(w, flusher, body.ThreadID, body.RunID, modelName, "evaluating", "Reviewing for accuracy", "Checking that the answer stays within the public portfolio scope."); err != nil {
-			log.Printf("ai chat stream write error: %v", err)
+			observability.Error(r.Context(), "ai.chat.stream.write_failed", "AI chat stream write failed", err)
 			return
 		}
 		if err := writeAIStreamEvent(w, flusher, map[string]any{
@@ -311,11 +311,11 @@ func aiChatStreamHandlerForProfile(svcCtx *svc.ServiceContext, skillProfile stri
 			"messageId": messageID,
 			"model":     modelName,
 		}); err != nil {
-			log.Printf("ai chat stream write error: %v", err)
+			observability.Error(r.Context(), "ai.chat.stream.write_failed", "AI chat stream write failed", err)
 			return
 		}
 		if err := writeAIStreamStage(w, flusher, body.ThreadID, body.RunID, modelName, "finalizing", "Finalizing answer", "Completing the assistant run and saving the conversation when available."); err != nil {
-			log.Printf("ai chat stream write error: %v", err)
+			observability.Error(r.Context(), "ai.chat.stream.write_failed", "AI chat stream write failed", err)
 			return
 		}
 		if err := writeAIStreamEvent(w, flusher, map[string]any{
@@ -330,12 +330,12 @@ func aiChatStreamHandlerForProfile(svcCtx *svc.ServiceContext, skillProfile stri
 				"completionTokens": finalChunk.EvalCount,
 			},
 		}); err != nil {
-			log.Printf("ai chat stream write error: %v", err)
+			observability.Error(r.Context(), "ai.chat.stream.write_failed", "AI chat stream write failed", err)
 			return
 		}
 		if persistedSession != nil && persistedUserMessage != nil && assistantContent.Len() > 0 {
 			if err := persistPortfolioChatExchange(r, svcCtx, persistedSession.ID, *persistedUserMessage, assistantContent.String(), modelName); err != nil {
-				log.Printf("portfolio chat persist error: %v", err)
+				observability.Error(r.Context(), "portfolio_chat.exchange.persist_failed", "Portfolio chat exchange persistence failed", err)
 			}
 		}
 	}
