@@ -129,22 +129,14 @@ jobs:
         run: |
           set -euo pipefail
           probe_id="alloy-install-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
-          legacy_probe="__alloy_probe_${GITHUB_RUN_ID}_${GITHUB_RUN_ATTEMPT}"
           query_url="${GRAFANA_LOKI_URL%/loki/api/v1/push}/loki/api/v1/query_range"
           stream_query='{application="portfolio-api",environment="production"}'
 
           curl --fail --silent --show-error \
             --header "X-Request-ID: $probe_id" \
             "$DEPLOY_HEALTH_URL" >/dev/null
-          legacy_status=$(curl --silent --show-error --output /dev/null --write-out '%{http_code}' \
-            "${DEPLOY_HEALTH_URL%/api/ready}/$legacy_probe")
-          [ "$legacy_status" = "404" ] || {
-            echo "Expected the legacy ingestion probe path to return 404, got $legacy_status" >&2
-            exit 1
-          }
 
           probe_query="${stream_query} |= \"$probe_id\""
-          legacy_query="${stream_query} |= \"$legacy_probe\""
           for _ in $(seq 1 18); do
             response=$(curl --fail --silent --show-error \
               --user "$GRAFANA_LOKI_USERNAME:$GRAFANA_LOKI_TOKEN" \
@@ -155,17 +147,7 @@ jobs:
               echo "Grafana Cloud received the structured request-ID probe log."
               exit 0
             fi
-
-            response=$(curl --fail --silent --show-error \
-              --user "$GRAFANA_LOKI_USERNAME:$GRAFANA_LOKI_TOKEN" \
-              --get "$query_url" \
-              --data-urlencode "query=$legacy_query" \
-              --data-urlencode 'limit=20')
-            if jq -e '.status == "success" and (.data.result | length > 0)' <<< "$response" >/dev/null; then
-              echo "Grafana Cloud received the request-specific legacy path probe; structured request-ID logging is not active in the current backend release."
-              exit 0
-            fi
             sleep 5
           done
-          echo "Grafana Cloud did not return either request-specific probe within 90 seconds" >&2
+          echo "Grafana Cloud did not return the structured request-ID probe within 90 seconds" >&2
           exit 1
