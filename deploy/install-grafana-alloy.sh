@@ -18,12 +18,12 @@ COMPOSE_FILE="$OBSERVABILITY_DIR/docker-compose.yml"
 ENV_FILE="$OBSERVABILITY_DIR/.env"
 
 install -d -m 750 "$OBSERVABILITY_DIR"
-# Alloy v1.17.1 has no image USER directive. Its root process has every
-# capability dropped and a read-only root filesystem; keep only the state
-# directory owned by UID/GID 0 so it remains writable without DAC overrides.
-install -d -m 750 "$OBSERVABILITY_DIR/data"
-chown 0:0 "$OBSERVABILITY_DIR/data"
-chmod 750 "$OBSERVABILITY_DIR/data"
+# Docker may remap container UIDs. Keep the collector state directory writable
+# across rootful and rootless/userns-remapped daemons. The parent remains 0750,
+# and the sticky bit prevents one mapped UID from deleting another's files.
+# This directory stores Alloy runtime state only; credentials stay in .env.
+install -d -m 1777 "$OBSERVABILITY_DIR/data"
+chmod 1777 "$OBSERVABILITY_DIR/data"
 install -m 644 "$STAGED_OBSERVABILITY_DIR/config.alloy" "$OBSERVABILITY_DIR/config.alloy"
 install -m 644 "$STAGED_OBSERVABILITY_DIR/docker-compose.yml" "$COMPOSE_FILE"
 
