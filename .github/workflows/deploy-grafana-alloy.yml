@@ -1,0 +1,134 @@
+name: Deploy Grafana Alloy
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: production-grafana-alloy
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    environment:
+      name: production
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+
+      - name: Validate required configuration
+        env:
+          GRAFANA_LOKI_URL: ${{ secrets.GRAFANA_LOKI_URL }}
+          GRAFANA_LOKI_USERNAME: ${{ secrets.GRAFANA_LOKI_USERNAME }}
+          GRAFANA_LOKI_TOKEN: ${{ secrets.GRAFANA_LOKI_TOKEN }}
+          VPS_HOST: ${{ secrets.VPS_HOST }}
+          VPS_USER: ${{ secrets.VPS_USER }}
+          VPS_SSH_KEY: ${{ secrets.VPS_SSH_KEY }}
+          VPS_KNOWN_HOSTS: ${{ secrets.VPS_KNOWN_HOSTS }}
+          DEPLOY_HEALTH_URL: ${{ vars.BACKEND_HEALTH_URL }}
+        run: |
+          set -euo pipefail
+          test -n "$GRAFANA_LOKI_URL"
+          test -n "$GRAFANA_LOKI_USERNAME"
+          test -n "$GRAFANA_LOKI_TOKEN"
+          test -n "$VPS_HOST"
+          test -n "$VPS_USER"
+          test -n "$VPS_SSH_KEY"
+          test -n "$VPS_KNOWN_HOSTS"
+          test -n "$DEPLOY_HEALTH_URL"
+          case "$GRAFANA_LOKI_URL" in
+            https://*/loki/api/v1/push) ;;
+            *) echo "GRAFANA_LOKI_URL must end with /loki/api/v1/push" >&2; exit 1 ;;
+          esac
+
+      - name: Prepare pinned SSH host identity
+        env:
+          VPS_HOST: ${{ secrets.VPS_HOST }}
+          VPS_SSH_KEY: ${{ secrets.VPS_SSH_KEY }}
+          VPS_KNOWN_HOSTS: ${{ secrets.VPS_KNOWN_HOSTS }}
+        run: |
+          set -euo pipefail
+          install -m 700 -d ~/.ssh
+          printf '%s\n' "$VPS_SSH_KEY" > ~/.ssh/deploy_key
+          chmod 600 ~/.ssh/deploy_key
+          printf '%s\n' "$VPS_KNOWN_HOSTS" > ~/.ssh/known_hosts
+          chmod 600 ~/.ssh/known_hosts
+          ssh-keygen -F "$VPS_HOST" -f ~/.ssh/known_hosts >/dev/null
+
+      - name: Stage Alloy deployment assets
+        env:
+          VPS_HOST: ${{ secrets.VPS_HOST }}
+          VPS_USER: ${{ secrets.VPS_USER }}
+        run: |
+          set -euo pipefail
+          remote_dir="/tmp/portfolio-grafana-alloy-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+          echo "REMOTE_DIR=$remote_dir" >> "$GITHUB_ENV"
+          ssh -i ~/.ssh/deploy_key \
+            -o BatchMode=yes \
+            -o StrictHostKeyChecking=yes \
+            -o ConnectTimeout=60 \
+            "${VPS_USER}@${VPS_HOST}" \
+            "install -d -m 700 '$remote_dir'"
+          scp -i ~/.ssh/deploy_key \
+            -o BatchMode=yes \
+            -o StrictHostKeyChecking=yes \
+            -o ConnectTimeout=60 \
+            observability/alloy/config.alloy \
+            observability/alloy/docker-compose.yml \
+            "${VPS_USER}@${VPS_HOST}:${remote_dir}/"
+
+      - name: Install Grafana Alloy
+        env:
+          GRAFANA_LOKI_URL: ${{ secrets.GRAFANA_LOKI_URL }}
+          GRAFANA_LOKI_USERNAME: ${{ secrets.GRAFANA_LOKI_USERNAME }}
+          GRAFANA_LOKI_TOKEN: ${{ secrets.GRAFANA_LOKI_TOKEN }}
+          VPS_HOST: ${{ secrets.VPS_HOST }}
+          VPS_USER: ${{ secrets.VPS_USER }}
+        run: |
+          set -euo pipefail
+          {
+            printf '%s\n' "$GRAFANA_LOKI_URL"
+            printf '%s\n' "$GRAFANA_LOKI_USERNAME"
+            printf '%s\n' "$GRAFANA_LOKI_TOKEN"
+            cat deploy/install-grafana-alloy.sh
+          } | ssh -i ~/.ssh/deploy_key \
+            -o BatchMode=yes \
+            -o StrictHostKeyChecking=yes \
+            -o ConnectTimeout=60 \
+            -o ServerAliveInterval=15 \
+            -o ServerAliveCountMax=4 \
+            "${VPS_USER}@${VPS_HOST}" \
+            "IFS= read -r GRAFANA_LOKI_URL; IFS= read -r GRAFANA_LOKI_USERNAME; IFS= read -r GRAFANA_LOKI_TOKEN; export GRAFANA_LOKI_URL GRAFANA_LOKI_USERNAME GRAFANA_LOKI_TOKEN; STAGED_OBSERVABILITY_DIR='$REMOTE_DIR' bash -se"
+
+      - name: Verify logs arrive in Grafana Cloud
+        env:
+          GRAFANA_LOKI_URL: ${{ secrets.GRAFANA_LOKI_URL }}
+          GRAFANA_LOKI_USERNAME: ${{ secrets.GRAFANA_LOKI_USERNAME }}
+          GRAFANA_LOKI_TOKEN: ${{ secrets.GRAFANA_LOKI_TOKEN }}
+          DEPLOY_HEALTH_URL: ${{ vars.BACKEND_HEALTH_URL }}
+        run: |
+          set -euo pipefail
+          probe_id="alloy-install-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+          curl --fail --silent --show-error \
+            --header "X-Request-ID: $probe_id" \
+            "$DEPLOY_HEALTH_URL" >/dev/null
+
+          query_url="${GRAFANA_LOKI_URL%/loki/api/v1/push}/loki/api/v1/query_range"
+          query="{application=\"portfolio-api\"} |= \"$probe_id\""
+          for _ in $(seq 1 18); do
+            response=$(curl --fail --silent --show-error \
+              --user "$GRAFANA_LOKI_USERNAME:$GRAFANA_LOKI_TOKEN" \
+              --get "$query_url" \
+              --data-urlencode "query=$query" \
+              --data-urlencode 'limit=20')
+            if jq -e '.status == "success" and (.data.result | length > 0)' <<< "$response" >/dev/null; then
+              echo "Grafana Cloud received the sanitized probe log."
+              exit 0
+            fi
+            sleep 5
+          done
+          echo "Grafana Cloud did not return the probe log within 90 seconds" >&2
+          exit 1
