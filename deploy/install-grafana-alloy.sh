@@ -35,7 +35,7 @@ mv "$env_tmp" "$ENV_FILE"
 
 docker compose --env-file "$ENV_FILE" -f "$COMPOSE_FILE" config --quiet
 docker compose --env-file "$ENV_FILE" -f "$COMPOSE_FILE" pull --quiet
-docker compose --env-file "$ENV_FILE" -f "$COMPOSE_FILE" up -d --remove-orphans
+docker compose --env-file "$ENV_FILE" -f "$COMPOSE_FILE" up -d --force-recreate --remove-orphans
 
 for _ in $(seq 1 30); do
   if curl -fsS http://127.0.0.1:12345/-/ready >/dev/null; then
@@ -43,7 +43,7 @@ for _ in $(seq 1 30); do
     # Startup component logs make discovery/remote-write failures diagnosable.
     # Alloy does not render sys.env secret values in these messages.
     docker compose --env-file "$ENV_FILE" -f "$COMPOSE_FILE" logs \
-      --no-color --since=2m --tail=100 grafana-alloy
+      --no-color --tail=100 grafana-alloy
     exit 0
   fi
   sleep 2
