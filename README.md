@@ -417,7 +417,7 @@ GRAFANA_LOKI_USERNAME  # Grafana Cloud hosted-logs instance ID
 GRAFANA_LOKI_TOKEN     # access-policy token with logs:write and logs:read
 ```
 
-The workflow transfers credentials over pinned SSH stdin, stores the production Alloy environment file with mode `0600`, starts a digest-pinned Alloy v1.17.1 container, probes the local Alloy readiness endpoint, and requires a request-specific Loki event from the production backend. It verifies the exact request ID when structured logging is active and temporarily falls back to a unique 404 path for an older backend release. Alloy reads only the `api`/`backend` Docker Compose services and assigns bounded `application="portfolio-api"` and `environment="production"` labels; request IDs remain inside log content and never become high-cardinality labels.
+The workflow transfers credentials over pinned SSH stdin, stores the production Alloy environment file with mode `0600`, starts a digest-pinned Alloy v1.17.1 container, probes the local Alloy readiness endpoint, and requires the exact structured request-ID event from the production backend. Alloy reads only the `api`/`backend` Docker Compose services and assigns bounded `application="portfolio-api"` and `environment="production"` labels; request IDs remain inside log content and never become high-cardinality labels.
 
 Example Grafana Explore query:
 
