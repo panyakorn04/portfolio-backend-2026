@@ -1,11 +1,11 @@
 package handler
 
 import (
-	"log"
 	"net/http"
 	"strings"
 
 	"portfolio-backend/internal/model"
+	"portfolio-backend/internal/observability"
 	"portfolio-backend/internal/response"
 	"portfolio-backend/internal/svc"
 )
@@ -89,7 +89,7 @@ func enqueueStudioWorkflowExecution(ctxRequest *http.Request, service *svc.Servi
 		InitialInput: sanitizeStudioExecutionItems(payload.Input), Path: path,
 	})
 	if err != nil {
-		log.Printf("studio graph enqueue failed workflow=%q: %v", workflow.ID, err)
+		observability.Error(ctxRequest.Context(), "studio.execution.enqueue_failed", "Studio graph enqueue failed", err)
 		return nil, "Unable to enqueue the workflow execution."
 	}
 	return item, ""
@@ -128,7 +128,7 @@ func AdminEnqueueStudioWorkflowHandler(service *svc.ServiceContext) http.Handler
 			return
 		}
 		if _, err := service.Studio.CreateAudit(r.Context(), studioAuditInput(r, service, access, "execution.create", "execution", item.ID, "", item.Status)); err != nil {
-			log.Printf("studio execution audit persistence failed: %v", err)
+			observability.Error(r.Context(), "studio.execution.audit_failed", "Studio execution audit persistence failed", err)
 		}
 		response.Ok(w, http.StatusAccepted, item)
 	}
@@ -166,7 +166,7 @@ func AdminExecuteStudioPreviousNodesHandler(service *svc.ServiceContext) http.Ha
 			return
 		}
 		if _, err := service.Studio.CreateAudit(r.Context(), studioAuditInput(r, service, access, "node.execute-previous", "execution", item.ID, "", item.Status)); err != nil {
-			log.Printf("studio execution audit persistence failed: %v", err)
+			observability.Error(r.Context(), "studio.execution.audit_failed", "Studio execution audit persistence failed", err)
 		}
 		response.Ok(w, http.StatusAccepted, item)
 	}

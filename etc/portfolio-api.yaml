@@ -6,6 +6,11 @@ Port: 8888
 # than normal CRUD handlers, so keep this aligned with the Ollama client timeout.
 Timeout: 120000
 
+# The built-in go-zero request logger may dump request headers/body on 5xx.
+# Keep tracing/metrics enabled, but use the application's sanitized request logger.
+Middlewares:
+  Log: false
+
 # CORS: frontend origin(s) allowed to call this API with credentials.
 CorsOrigins:
   - http://localhost:3000
@@ -54,4 +59,8 @@ PortfolioChatMaxStoredMessages: 100
 
 Log:
   ServiceName: portfolio-api
+  Mode: console
+  Encoding: json
   Level: info
+  Stat: true
+  MaxContentLength: 8192

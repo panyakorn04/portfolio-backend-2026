@@ -2,11 +2,11 @@ package handler
 
 import (
 	"errors"
-	"log"
 	"net/http"
 	"strings"
 
 	"portfolio-backend/internal/model"
+	"portfolio-backend/internal/observability"
 	"portfolio-backend/internal/response"
 	"portfolio-backend/internal/svc"
 )
@@ -117,7 +117,7 @@ func AdminCreateStudioCredentialHandler(service *svc.ServiceContext) http.Handle
 			return
 		}
 		if _, err := service.Studio.CreateAudit(r.Context(), studioAuditInput(r, service, access, "credential.create", "credential", item.ID, "", "created")); err != nil {
-			log.Printf("studio credential audit persistence failed: %v", err)
+			observability.Error(r.Context(), "studio.credential.audit_failed", "Studio credential audit persistence failed", err)
 			response.Error(w, http.StatusInternalServerError, "Credential created but its audit record could not be saved.")
 			return
 		}
@@ -167,7 +167,7 @@ func AdminUpdateStudioCredentialHandler(service *svc.ServiceContext) http.Handle
 			return
 		}
 		if _, err := service.Studio.CreateAudit(r.Context(), studioAuditInput(r, service, access, "credential.update", "credential", item.ID, "", "updated")); err != nil {
-			log.Printf("studio credential audit persistence failed: %v", err)
+			observability.Error(r.Context(), "studio.credential.audit_failed", "Studio credential audit persistence failed", err)
 			response.Error(w, http.StatusInternalServerError, "Credential updated but its audit record could not be saved.")
 			return
 		}
@@ -206,7 +206,7 @@ func AdminDeleteStudioCredentialHandler(service *svc.ServiceContext) http.Handle
 			return
 		}
 		if _, err := service.Studio.CreateAudit(r.Context(), studioAuditInput(r, service, access, "credential.delete", "credential", id, "", "deleted")); err != nil {
-			log.Printf("studio credential audit persistence failed: %v", err)
+			observability.Error(r.Context(), "studio.credential.audit_failed", "Studio credential audit persistence failed", err)
 			response.Error(w, http.StatusInternalServerError, "Credential deleted but its audit record could not be saved.")
 			return
 		}
@@ -242,7 +242,7 @@ func AdminTestStudioCredentialHandler(service *svc.ServiceContext) http.HandlerF
 			return
 		}
 		if _, err := service.Studio.CreateAudit(r.Context(), studioAuditInput(r, service, access, "credential.test", "credential", id, "", "valid")); err != nil {
-			log.Printf("studio credential audit persistence failed: %v", err)
+			observability.Error(r.Context(), "studio.credential.audit_failed", "Studio credential audit persistence failed", err)
 			response.Error(w, http.StatusInternalServerError, "Credential tested but its audit record could not be saved.")
 			return
 		}

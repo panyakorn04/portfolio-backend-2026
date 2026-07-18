@@ -5,11 +5,11 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"fmt"
-	"log"
 	"sync"
 	"time"
 
 	"portfolio-backend/internal/model"
+	"portfolio-backend/internal/observability"
 	"portfolio-backend/internal/svc"
 )
 
@@ -73,7 +73,7 @@ func (runner *StudioExecutionRunner) loop(ctx context.Context) {
 	defer ticker.Stop()
 	for {
 		if err := runner.runAvailable(ctx); err != nil && ctx.Err() == nil {
-			log.Printf("studio execution worker error: %v", err)
+			observability.Error(ctx, "studio.worker.run_failed", "Studio execution worker failed", err)
 		}
 		select {
 		case <-ctx.Done():
@@ -90,7 +90,7 @@ func (runner *StudioExecutionRunner) scheduleLoop(ctx context.Context) {
 	defer ticker.Stop()
 	for {
 		if err := runner.enqueueDueSchedules(ctx, time.Now().UTC()); err != nil && ctx.Err() == nil {
-			log.Printf("studio schedule enqueue error: %v", err)
+			observability.Error(ctx, "studio.schedule.enqueue_failed", "Studio schedule enqueue failed", err)
 		}
 		select {
 		case <-ctx.Done():
@@ -117,7 +117,7 @@ func (runner *StudioExecutionRunner) runAvailable(ctx context.Context) error {
 func (runner *StudioExecutionRunner) execute(ctx context.Context, execution *model.StudioExecution) {
 	fail := func(code, message string) {
 		if _, err := runner.service.Studio.FinishGraphExecution(ctx, execution.ID, runner.workerID, "failed", code, message); err != nil {
-			log.Printf("studio execution %q finalization failed: %v", execution.ID, err)
+			observability.Error(ctx, "studio.execution.finalization_failed", "Studio execution finalization failed", err)
 		}
 	}
 	workflow, err := runner.service.Studio.FindWorkflow(ctx, execution.WorkflowID)
@@ -223,7 +223,7 @@ func (runner *StudioExecutionRunner) execute(ctx context.Context, execution *mod
 		items = output
 	}
 	if _, err := runner.service.Studio.FinishGraphExecution(ctx, execution.ID, runner.workerID, "completed", "", ""); err != nil {
-		log.Printf("studio execution %q finalization failed: %v", execution.ID, err)
+		observability.Error(ctx, "studio.execution.finalization_failed", "Studio execution finalization failed", err)
 	}
 }
 

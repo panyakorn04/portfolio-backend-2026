@@ -387,6 +387,30 @@ When Redis is enabled, successful public article responses are cached for:
 
 The default TTL is five minutes. Redis failures are non-fatal for article reads; the API falls back to Supabase REST. Admin article mutations clear `portfolio:articles:*` keys.
 
+## Application logging
+
+The API emits structured JSON logs to stdout so Docker can collect them without a writable log volume. Runtime configuration is explicit in `etc/portfolio-api.yaml`: console mode, JSON encoding, `info` level, and an 8 KiB per-entry content limit.
+
+A sanitized HTTP middleware emits one `http.request.completed` event per completed request with bounded metadata only:
+
+```text
+event, request_id, method, route, status, duration_ms
+```
+
+Valid incoming `X-Request-ID` values are propagated through request context, included in application error events, and returned in the response; missing or unsafe values are replaced. CORS preflights are logged too, and `X-Request-ID` is included in the allowed/exposed CORS headers. Request logs use registered route patterns rather than raw URL paths, so resource identifiers and article slugs are not emitted. The logger wraps CORS and the go-zero router, so native timeout and panic-recovery responses are recorded with their final status. The middleware never records query strings, request/response bodies, authorization headers, or cookies. The built-in go-zero request logger remains disabled because its 5xx path can dump request headers and bodies. Tracing, Prometheus, recovery, timeout, and the other native middleware remain enabled.
+
+Application failures use context-aware `logx` events so go-zero trace/span correlation is retained. Event names are stable dotted identifiers such as `studio.execution.enqueue_failed`, `portfolio_chat.session.create_failed`, and `ollama.generate.failed`. Operational logs record only the Go `error_type`; arbitrary `err.Error()` text is never serialized because dependency response bodies may contain tokens, visitor identifiers, PII, or raw AI content.
+
+Never log passwords, bearer/session tokens, cookies, Supabase keys, Studio credentials, webhook capabilities, visitor identifiers, raw AI messages, or arbitrary request bodies. `StudioAuditLog` remains the immutable business audit trail and is intentionally separate from operational stdout logs.
+
+Local inspection:
+
+```bash
+docker compose logs -f api
+```
+
+Production can ship the same stdout stream to Loki through Grafana Alloy without changing application code.
+
 ## CI/CD and production deployment
 
 `.github/workflows/ci.yml` runs for pull requests, pushes to `main`, and manual dispatches.

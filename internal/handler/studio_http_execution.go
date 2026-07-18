@@ -5,11 +5,11 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
-	"log"
 	"net/http"
 	"strings"
 
 	"portfolio-backend/internal/model"
+	"portfolio-backend/internal/observability"
 	"portfolio-backend/internal/svc"
 )
 
@@ -78,7 +78,7 @@ func executeStudioHTTPRequestNode(ctx context.Context, service *svc.ServiceConte
 	}
 	responseValue, err := httpClient.Do(request)
 	if err != nil {
-		log.Printf("studio graph HTTP request failed workflow=%q node=%q host=%q error_type=%T", workflowID, node.ID, parsedURL.Hostname(), err)
+		observability.ErrorType(ctx, "studio.http_request.failed", "Studio graph HTTP request failed", err)
 		return nil, studioExecutionHTTPError(err)
 	}
 	defer responseValue.Body.Close()
