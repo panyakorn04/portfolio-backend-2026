@@ -20,11 +20,8 @@ services:
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock:ro
       - ./config.alloy:/etc/alloy/config.alloy:ro
-      - alloy-data:/var/lib/alloy/data
+      - ./data:/var/lib/alloy/data
     ports:
       - 127.0.0.1:12345:12345
     tmpfs:
       - /tmp:size=16m,mode=1777
-
-volumes:
-  alloy-data:
