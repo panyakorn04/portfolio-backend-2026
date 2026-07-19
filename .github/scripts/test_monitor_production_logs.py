@@ -10,6 +10,9 @@ assert SPEC is not None and SPEC.loader is not None
 monitor = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(monitor)
 
+ALLOWED_ROUTES = frozenset({"/api/health", "/api/ai/chat", "unmatched"})
+ALLOWED_EVENTS = frozenset({"http.request.completed", "studio.execution.failed"})
+
 
 class MonitorProductionLogsTest(unittest.TestCase):
     def test_http_requests_include_explicit_user_agent(self):
@@ -26,25 +29,38 @@ class MonitorProductionLogsTest(unittest.TestCase):
         summary = monitor.aggregate_incidents(
             [
                 {"event": "http.request.completed", "status": 200, "route": "/api/health"},
-                {"event": "http.request.completed", "status": 500, "route": "/api/chat"},
+                {"event": "http.request.completed", "status": 500, "route": "/api/ai/chat"},
                 {"event": "studio.execution.failed", "level": "error", "error_type": "deadline"},
-            ]
+            ],
+            ALLOWED_ROUTES,
+            ALLOWED_EVENTS,
         )
         self.assertEqual(summary["count"], 2)
         self.assertEqual(summary["statuses"], [("500", 1)])
-        self.assertEqual(summary["routes"], [("/api/chat", 1)])
+        self.assertEqual(summary["routes"], [("/api/ai/chat", 1)])
         self.assertIn(("studio.execution.failed", 1), summary["events"])
+        self.assertEqual(summary["error_types"], [(monitor.ERROR_TYPE_PRESENT, 1)])
 
     def test_aggregate_redacts_untrusted_dimensions(self):
-        sentinel = "visitor@example.com raw secret"
+        sentinel = "ghp_supersecrettoken123"
         summary = monitor.aggregate_incidents(
-            [{"status": 500, "route": sentinel, "event": sentinel, "error_type": sentinel}]
+            [{"status": 500, "route": "/api/users/customer123", "event": sentinel, "error_type": sentinel}],
+            ALLOWED_ROUTES,
+            ALLOWED_EVENTS,
         )
         encoded = str(summary)
-        self.assertNotIn("visitor@example.com", encoded)
+        self.assertNotIn("customer123", encoded)
+        self.assertNotIn("supersecrettoken123", encoded)
         self.assertEqual(summary["routes"], [(monitor.REDACTED, 1)])
         self.assertEqual(summary["events"], [(monitor.REDACTED, 1)])
-        self.assertEqual(summary["error_types"], [(monitor.REDACTED, 1)])
+        self.assertEqual(summary["error_types"], [(monitor.ERROR_TYPE_PRESENT, 1)])
+
+    def test_repo_allowlists_include_declared_routes_and_events(self):
+        repo_root = pathlib.Path(__file__).resolve().parents[2]
+        routes, events = monitor.load_dimension_allowlists(repo_root)
+        self.assertIn("/api/health", routes)
+        self.assertIn("http.request.completed", events)
+        self.assertIn("studio.execution.enqueue_failed", events)
 
     def test_notification_lifecycle_and_reminder(self):
         summary = {
@@ -98,6 +114,29 @@ class MonitorProductionLogsTest(unittest.TestCase):
         with mock.patch.object(monitor, "request_json", return_value=malformed):
             with self.assertRaisesRegex(RuntimeError, "stream is malformed"):
                 monitor.query_loki_page("https://logs.example/query_range", "auth", 0, 1)
+
+    def test_loki_missing_result_and_unparseable_line_fail_closed(self):
+        missing = {"status": "success", "data": {}}
+        with mock.patch.object(monitor, "request_json", return_value=missing):
+            with self.assertRaisesRegex(RuntimeError, "result is missing"):
+                monitor.query_loki_page("https://logs.example/query_range", "auth", 0, 1)
+        unparseable = {"status": "success", "data": {"result": [{"values": [["1", "plain text"]]}]}}
+        with mock.patch.object(monitor, "request_json", return_value=unparseable):
+            with self.assertRaisesRegex(RuntimeError, "unparseable"):
+                monitor.query_loki_page("https://logs.example/query_range", "auth", 0, 1)
+
+    def test_fingerprint_includes_dimensions_outside_top_ten(self):
+        allowed_routes = frozenset(f"/api/r{i}" for i in range(12))
+        records = []
+        for index in range(11):
+            records.extend({"status": 500, "route": f"/api/r{index}"} for _ in range(20 - index))
+        first = monitor.aggregate_incidents(records, allowed_routes, frozenset())
+        second = monitor.aggregate_incidents(
+            records + [{"status": 500, "route": "/api/r11"}], allowed_routes, frozenset()
+        )
+        self.assertEqual(first["routes"], second["routes"])
+        self.assertNotEqual(monitor.fingerprint(first), monitor.fingerprint(second))
+        self.assertNotIn("_fingerprint", monitor.public_summary(second))
 
     def test_monitor_failure_message_does_not_expose_error_text(self):
         message = monitor.monitor_failure_message(RuntimeError("token=secret-value"))
