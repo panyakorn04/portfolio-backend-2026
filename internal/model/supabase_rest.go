@@ -81,7 +81,11 @@ func exactCount(resp *http.Response, fallback int) int {
 	if resp == nil {
 		return fallback
 	}
-	contentRange := resp.Header.Get("Content-Range")
+	return exactCountFromHeader(resp.Header, fallback)
+}
+
+func exactCountFromHeader(header http.Header, fallback int) int {
+	contentRange := header.Get("Content-Range")
 	if contentRange == "" {
 		return fallback
 	}

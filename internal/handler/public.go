@@ -13,7 +13,11 @@ import (
 	"portfolio-backend/internal/svc"
 )
 
-const maxContactBodyBytes int64 = 8 * 1024
+const (
+	maxContactBodyBytes       int64 = 8 * 1024
+	defaultPublicArticleLimit       = 20
+	maxPublicArticleLimit           = 100
+)
 
 func HealthHandler(svcCtx *svc.ServiceContext) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
@@ -118,16 +122,17 @@ func ArticlesHandler(svcCtx *svc.ServiceContext) http.HandlerFunc {
 			return
 		}
 
-		var limit *int
+		limitValue := defaultPublicArticleLimit
 		if limitParam := r.URL.Query().Get("limit"); limitParam != "" {
 			n, err := strconv.Atoi(limitParam)
-			if err != nil || n < 1 {
+			if err != nil || n < 1 || n > maxPublicArticleLimit {
 				response.Error(w, http.StatusBadRequest, "Invalid limit.",
-					response.ErrorDetail{Field: "limit", Message: "Limit must be a positive integer."})
+					response.ErrorDetail{Field: "limit", Message: "Limit must be between 1 and 100."})
 				return
 			}
-			limit = &n
+			limitValue = n
 		}
+		limit := &limitValue
 
 		cacheKey := articleListCacheKey(locale, limit)
 		if body, ok := svcCtx.ArticleCache.Get(r.Context(), cacheKey); ok {
@@ -157,22 +162,15 @@ func ArticlesHandler(svcCtx *svc.ServiceContext) http.HandlerFunc {
 			}
 		}
 
-		total := len(items)
-		if limit != nil {
-			var all []model.Article
-			if svcCtx.SupabaseArticles != nil {
-				all, err = svcCtx.SupabaseArticles.ListPublished(r.Context(), nil)
-			} else {
-				all, err = svcCtx.Articles.ListPublished(r.Context(), nil)
-			}
-			if err == nil {
-				total = 0
-				for i := range all {
-					if logic.ToListItem(&all[i], locale) != nil {
-						total++
-					}
-				}
-			}
+		var total int
+		if svcCtx.SupabaseArticles != nil {
+			total, err = svcCtx.SupabaseArticles.CountPublishedForLocale(r.Context(), locale)
+		} else {
+			total, err = svcCtx.Articles.CountPublishedForLocale(r.Context(), locale)
+		}
+		if err != nil {
+			response.Error(w, http.StatusInternalServerError, "Unable to count articles.")
+			return
 		}
 
 		payload := map[string]any{
