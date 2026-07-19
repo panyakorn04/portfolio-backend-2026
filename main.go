@@ -22,6 +22,10 @@ func main() {
 
 	var c config.Config
 	conf.MustLoad(*configFile, &c, conf.UseEnv())
+	if err := config.ApplyEnvironmentOverrides(&c, os.LookupEnv); err != nil {
+		observability.Error(context.Background(), "config.environment.invalid", "Invalid runtime environment configuration", err)
+		os.Exit(1)
+	}
 
 	requestRouter := observability.NewHTTPRouter(nil, c.CorsOrigins...)
 	server := rest.MustNewServer(c.RestConf, rest.WithRouter(requestRouter))

@@ -10,6 +10,8 @@ import (
 func TestProductionConfigUsesSanitizedApplicationRequestLogging(t *testing.T) {
 	t.Setenv("ARTICLE_CACHE_TTL_SECONDS", "300")
 	t.Setenv("TRUST_PROXY", "false")
+	t.Setenv("PORTFOLIO_CHAT_SESSION_TTL_HOURS", "2160")
+	t.Setenv("PORTFOLIO_CHAT_MAX_STORED_MESSAGES", "100")
 
 	var cfg Config
 	path := filepath.Join("..", "..", "etc", "portfolio-api.yaml")
