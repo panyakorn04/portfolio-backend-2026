@@ -56,34 +56,6 @@ func JobsContactFollowUpHandler(svcCtx *svc.ServiceContext) http.HandlerFunc {
 			return
 		}
 
-		var body struct {
-			InquiryID string `json:"inquiryId"`
-		}
-		if !decodeJSON(w, r, &body) {
-			return
-		}
-
-		inquiryID := strings.TrimSpace(body.InquiryID)
-		if inquiryID == "" {
-			response.Error(w, http.StatusBadRequest, "inquiryId is required.",
-				response.ErrorDetail{Field: "inquiryId", Message: "Provide a valid inquiry id."})
-			return
-		}
-		if !requireDatabase(w, svcCtx) {
-			return
-		}
-
-		inquiry, err := svcCtx.Inquiries.FindByID(r.Context(), inquiryID)
-		if err != nil {
-			response.Error(w, http.StatusInternalServerError, "Unable to load inquiry.")
-			return
-		}
-		if inquiry == nil {
-			response.Error(w, http.StatusNotFound, "Inquiry not found.")
-			return
-		}
-
-		queued := logic.QueueContactFollowUp(inquiry)
-		response.Ok(w, http.StatusAccepted, queued)
+		response.Error(w, http.StatusNotImplemented, "Contact follow-up processing is not configured.")
 	}
 }
