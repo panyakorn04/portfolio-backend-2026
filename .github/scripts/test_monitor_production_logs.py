@@ -1,6 +1,8 @@
 import importlib.util
+import io
 import pathlib
 import unittest
+from unittest import mock
 
 SCRIPT = pathlib.Path(__file__).with_name("monitor-production-logs.py")
 SPEC = importlib.util.spec_from_file_location("monitor_production_logs", SCRIPT)
@@ -10,6 +12,12 @@ SPEC.loader.exec_module(monitor)
 
 
 class MonitorProductionLogsTest(unittest.TestCase):
+    def test_http_requests_include_explicit_user_agent(self):
+        with mock.patch.object(monitor.urllib.request, "urlopen", return_value=io.BytesIO(b"{}")) as urlopen:
+            monitor.request_json("https://example.com/test")
+        request = urlopen.call_args.args[0]
+        self.assertEqual(request.get_header("User-agent"), "portfolio-production-monitor/1.0")
+
     def test_parse_nested_docker_json(self):
         record = monitor.parse_log_line('{"log":"{\\"event\\":\\"http.request.completed\\",\\"status\\":500}\\n"}')
         self.assertEqual(record["status"], 500)
