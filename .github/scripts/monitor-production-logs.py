@@ -65,14 +65,17 @@ def parse_log_line(raw: str) -> dict[str, Any] | None:
     if not isinstance(record, dict):
         return None
 
-    nested = record.get("log")
-    if isinstance(nested, str):
+    if "log" in record:
+        nested = record["log"]
+        if not isinstance(nested, str):
+            return None
         try:
             parsed_nested = json.loads(nested.strip())
         except json.JSONDecodeError:
-            parsed_nested = None
-        if isinstance(parsed_nested, dict):
-            record = parsed_nested
+            return None
+        if not isinstance(parsed_nested, dict):
+            return None
+        record = parsed_nested
     return record
 
 
@@ -92,15 +95,12 @@ def allowlisted_dimension(value: Any, allowed: frozenset[str]) -> str:
 
 
 def load_dimension_allowlists(repo_root: Path) -> tuple[frozenset[str], frozenset[str]]:
-    api_path = repo_root / "portfolio.api"
+    routes_path = repo_root / "internal" / "handler" / "routes.go"
     try:
-        api_source = api_path.read_text()
+        routes_source = routes_path.read_text()
     except OSError as error:
         raise RuntimeError("Unable to load the trusted route allowlist source") from error
-    routes = {
-        match.group(1)
-        for match in re.finditer(r"^\s*(?:get|post|put|patch|delete)\s+(/\S+)", api_source, re.MULTILINE)
-    }
+    routes = set(re.findall(r'\bPath:\s*"(/[^"]+)"', routes_source))
     if not routes:
         raise RuntimeError("Trusted route allowlist is empty")
     routes.add("unmatched")

@@ -25,6 +25,11 @@ class MonitorProductionLogsTest(unittest.TestCase):
         record = monitor.parse_log_line('{"log":"{\\"event\\":\\"http.request.completed\\",\\"status\\":500}\\n"}')
         self.assertEqual(record["status"], 500)
 
+    def test_parse_malformed_nested_docker_log_fails_closed(self):
+        self.assertIsNone(monitor.parse_log_line('{"log":"plain text\\n","stream":"stdout"}'))
+        self.assertIsNone(monitor.parse_log_line('{"log":"{bad json}\\n","stream":"stdout"}'))
+        self.assertIsNone(monitor.parse_log_line('{"log":42,"stream":"stdout"}'))
+
     def test_aggregate_includes_5xx_and_error_events_only(self):
         summary = monitor.aggregate_incidents(
             [
@@ -42,7 +47,7 @@ class MonitorProductionLogsTest(unittest.TestCase):
         self.assertEqual(summary["error_types"], [(monitor.ERROR_TYPE_PRESENT, 1)])
 
     def test_aggregate_redacts_untrusted_dimensions(self):
-        sentinel = "ghp_supersecrettoken123"
+        sentinel = "unknown_event_abc123"
         summary = monitor.aggregate_incidents(
             [{"status": 500, "route": "/api/users/customer123", "event": sentinel, "error_type": sentinel}],
             ALLOWED_ROUTES,
@@ -50,7 +55,7 @@ class MonitorProductionLogsTest(unittest.TestCase):
         )
         encoded = str(summary)
         self.assertNotIn("customer123", encoded)
-        self.assertNotIn("supersecrettoken123", encoded)
+        self.assertNotIn("unknown_event_abc123", encoded)
         self.assertEqual(summary["routes"], [(monitor.REDACTED, 1)])
         self.assertEqual(summary["events"], [(monitor.REDACTED, 1)])
         self.assertEqual(summary["error_types"], [(monitor.ERROR_TYPE_PRESENT, 1)])
@@ -58,7 +63,17 @@ class MonitorProductionLogsTest(unittest.TestCase):
     def test_repo_allowlists_include_declared_routes_and_events(self):
         repo_root = pathlib.Path(__file__).resolve().parents[2]
         routes, events = monitor.load_dimension_allowlists(repo_root)
-        self.assertIn("/api/health", routes)
+        expected_routes = {
+            "/api/health",
+            "/api/ready",
+            "/api/admin/chat/sessions",
+            "/api/admin/chat/sessions/:id",
+            "/api/admin/chat/sessions/:id/reply",
+            "/api/portfolio/assistant/sessions/:id/request-human",
+            "/swagger",
+            "/swagger/doc.json",
+        }
+        self.assertTrue(expected_routes.issubset(routes))
         self.assertIn("http.request.completed", events)
         self.assertIn("studio.execution.enqueue_failed", events)
 
