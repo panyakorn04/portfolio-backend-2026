@@ -38,7 +38,11 @@ def request_json(
     timeout: int = 30,
 ) -> dict[str, Any]:
     data = None
-    request_headers = {"Accept": "application/json", **(headers or {})}
+    request_headers = {
+        "Accept": "application/json",
+        "User-Agent": "portfolio-production-monitor/1.0",
+        **(headers or {}),
+    }
     if body is not None:
         data = json.dumps(body, separators=(",", ":")).encode()
         request_headers["Content-Type"] = "application/json"
