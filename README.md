@@ -458,18 +458,22 @@ Use **Production Log Monitor → Run workflow → dry_run=true** to verify Loki 
 - Docker Buildx `linux/amd64` image build with a reusable GitHub Actions cache
 - Trivy fail-closed scanning for fixed high/critical OS and Go dependency vulnerabilities
 - Exact-image Docker health check plus an external `/api/health` HTTP probe before deployment
+- Sequential migration smoke test on disposable PostgreSQL, including RLS and backend-only grant verification
+- Deploy-impact classification tests for path-aware release gating
 
 Stale runs are cancelled per pull-request ref, while runs on the same `main` or manual-dispatch ref remain serialized. Third-party actions are pinned to immutable commit SHAs and use Node 24-compatible releases.
 
 ### Immutable release flow
 
-For non-PR runs, the image is built and loaded locally, scanned, and smoke-tested before it is published only as:
+For application-impacting non-PR runs, the image is built and loaded locally, scanned, smoke-tested, and then pushed directly from that same local image ID (without rebuilding) only as:
 
 ```text
 ghcr.io/panyakorn04/portfolio-backend-2026:<full-commit-sha>
 ```
 
 There is no mutable `latest` deployment tag. Production deploys select the exact commit image, authenticate to GHCR with the short-lived repository `GITHUB_TOKEN`, and remove the temporary Docker credential directory afterward.
+
+Documentation, monitoring, and workflow-only pushes still run validation and linting but skip application image publication, deployment preflight, and production approval. Changes under application, image, Compose, deploy, AI asset, or migration paths remain deploy-impacting.
 
 Before the protected `production` approval, rollout preflight verifies the immutable release image, pullable previous successful image, required repository assets, and migration state. Pushes that add migrations stop before approval; after applying and verifying those migrations manually, rerun with `migration_verified` enabled. Every production deploy and rollback then waits for a required reviewer to approve the protected `production` environment; there is no time-based deployment window or emergency time override.
 

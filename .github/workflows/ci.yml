@@ -32,9 +32,49 @@ env:
   IMAGE_REPOSITORY: ${{ vars.BACKEND_IMAGE_REPOSITORY }}
 
 jobs:
+  changes:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      app_changed: ${{ steps.classify.outputs.app_changed }}
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          fetch-depth: 2
+      - name: Classify deploy impact
+        id: classify
+        env:
+          BEFORE_SHA: ${{ github.event.before }}
+        run: |
+          set -euo pipefail
+          if [ "$GITHUB_EVENT_NAME" = pull_request ] || [ "$GITHUB_EVENT_NAME" = workflow_dispatch ]; then
+            app_changed=true
+          elif [ -z "$BEFORE_SHA" ] || ! git cat-file -e "${BEFORE_SHA}^{commit}" 2>/dev/null; then
+            app_changed=true
+          else
+            app_changed="$(git diff --name-only "$BEFORE_SHA" "$GITHUB_SHA" | bash .github/scripts/classify-deploy-change.sh)"
+          fi
+          echo "app_changed=$app_changed" >> "$GITHUB_OUTPUT"
+
   validate:
     runs-on: ubuntu-latest
     timeout-minutes: 15
+    services:
+      postgres:
+        image: postgres:17-alpine
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: portfolio_migrations
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d portfolio_migrations"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      DATABASE_URL: postgresql://postgres:postgres@127.0.0.1:5432/portfolio_migrations?sslmode=disable
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
       - uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6.5.0
@@ -53,6 +93,10 @@ jobs:
         run: python3 .github/scripts/test_monitor_production_logs.py
       - name: Test backend-only Supabase table contract
         run: python3 .github/scripts/test_migration_security.py
+      - name: Smoke test all migrations on PostgreSQL
+        run: bash .github/scripts/smoke-test-migrations.sh
+      - name: Test deploy change classifier
+        run: bash .github/scripts/classify-deploy-change.sh --self-test
       - name: Validate deployment scripts
         run: >-
           bash -n
@@ -62,6 +106,8 @@ jobs:
           .github/scripts/deploy-preflight.sh
           .github/scripts/reconcile-rollout.sh
           .github/scripts/notify-deploy.sh
+          .github/scripts/classify-deploy-change.sh
+          .github/scripts/smoke-test-migrations.sh
       - name: Validate production log monitor workflow
         run: python3 -m py_compile .github/scripts/monitor-production-logs.py
 
@@ -80,8 +126,10 @@ jobs:
           args: --timeout=5m
 
   image:
-    if: github.event_name != 'workflow_dispatch' || inputs.action != 'rollback'
-    needs: [validate, lint]
+    if: >-
+      (github.event_name != 'workflow_dispatch' || inputs.action != 'rollback') &&
+      (github.event_name == 'pull_request' || github.event_name == 'workflow_dispatch' || needs.changes.outputs.app_changed == 'true')
+    needs: [changes, validate, lint]
     runs-on: ubuntu-latest
     timeout-minutes: 25
     permissions:
@@ -128,25 +176,16 @@ jobs:
         run: bash .github/scripts/smoke-test-image.sh "${IMAGE_REPOSITORY}:${GITHUB_SHA}"
       - name: Publish verified image
         if: github.event_name != 'pull_request'
-        uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a # v7.3.0
-        with:
-          context: .
-          platforms: linux/amd64
-          push: true
-          tags: ${{ env.IMAGE_REPOSITORY }}:${{ github.sha }}
-          labels: |
-            org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
-            org.opencontainers.image.revision=${{ github.sha }}
-            org.opencontainers.image.title=portfolio-backend-2026
-          cache-from: type=gha
+        run: docker push "${IMAGE_REPOSITORY}:${GITHUB_SHA}"
 
   deploy-preflight:
     if: >-
       always() && github.event_name != 'pull_request' && github.ref == 'refs/heads/main' &&
       needs.validate.result == 'success' && needs.lint.result == 'success' &&
+      (github.event_name == 'workflow_dispatch' || needs.changes.outputs.app_changed == 'true') &&
       (needs.image.result == 'success' ||
        (github.event_name == 'workflow_dispatch' && inputs.action == 'rollback' && needs.image.result == 'skipped'))
-    needs: [validate, lint, image]
+    needs: [changes, validate, lint, image]
     runs-on: ubuntu-latest
     timeout-minutes: 10
     permissions:
