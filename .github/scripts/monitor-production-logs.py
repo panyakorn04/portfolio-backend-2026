@@ -165,7 +165,10 @@ def discord_message(kind: str, summary: dict[str, Any], analysis: str, window_se
     if kind == "resolved":
         return "✅ **Portfolio API incident resolved**\nไม่พบ HTTP 5xx หรือ error events ในช่วงตรวจล่าสุด"
 
-    heading = "🚨 **Portfolio API production alert**" if kind == "firing" else "⚠️ **Portfolio API incident reminder**"
+    if summary.get("synthetic_test"):
+        heading = "🧪 **Portfolio API monitor test alert**"
+    else:
+        heading = "🚨 **Portfolio API production alert**" if kind == "firing" else "⚠️ **Portfolio API incident reminder**"
     lines = [
         heading,
         f"Window: last {window_seconds // 60} minutes | Incidents: **{summary['count']}**",
@@ -221,6 +224,7 @@ def main() -> int:
     ai_url = env("AI_LOG_SUMMARY_URL", required=False, default="https://api.panyakorn.com/api/ai/generate")
     state_path = Path(env("MONITOR_STATE_FILE", required=False, default=".monitor-state/state.json"))
     dry_run = env("MONITOR_DRY_RUN", required=False, default="false").lower() == "true"
+    test_alert = env("MONITOR_TEST_ALERT", required=False, default="false").lower() == "true"
     reminder_seconds = int(env("MONITOR_REMINDER_SECONDS", required=False, default=str(DEFAULT_REMINDER_SECONDS)))
 
     if not push_url.startswith("https://") or not push_url.endswith("/loki/api/v1/push"):
@@ -234,7 +238,18 @@ def main() -> int:
     start_seconds = max(previous_checked - 30, now - 900) if previous_checked else now - DEFAULT_LOOKBACK_SECONDS
     records = query_loki(push_url, username, token, start_seconds * 1_000_000_000, now * 1_000_000_000)
     summary = aggregate_incidents(records)
-    kind = notification_kind(summary, state, now, reminder_seconds)
+    if test_alert:
+        summary = {
+            "count": 1,
+            "statuses": [["500", 1]],
+            "routes": [["/synthetic-monitor-test", 1]],
+            "events": [["monitor.synthetic_test", 1]],
+            "error_types": [],
+            "synthetic_test": True,
+        }
+        kind = "firing"
+    else:
+        kind = notification_kind(summary, state, now, reminder_seconds)
     print(json.dumps({"kind": kind, "summary": summary}, ensure_ascii=False))
 
     analysis = ""
@@ -252,7 +267,7 @@ def main() -> int:
         else:
             send_discord(webhook_url, message)
 
-    if not dry_run:
+    if not dry_run and not test_alert:
         state_path.parent.mkdir(parents=True, exist_ok=True)
         next_state = {
             "active": summary["count"] > 0,

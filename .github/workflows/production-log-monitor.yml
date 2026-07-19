@@ -9,6 +9,10 @@ on:
         description: Query and summarize logs without sending Discord or updating state
         type: boolean
         default: true
+      send_test_alert:
+        description: Send a clearly labeled synthetic alert to test AI and Discord without changing incident state
+        type: boolean
+        default: false
 
 permissions:
   actions: read
@@ -56,12 +60,16 @@ jobs:
           DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
           AI_LOG_SUMMARY_URL: ${{ vars.AI_LOG_SUMMARY_URL }}
           MONITOR_DRY_RUN: ${{ github.event_name == 'workflow_dispatch' && inputs.dry_run || false }}
+          MONITOR_TEST_ALERT: ${{ github.event_name == 'workflow_dispatch' && inputs.send_test_alert || false }}
           MONITOR_STATE_FILE: .monitor-state/state.json
           MONITOR_REMINDER_SECONDS: '1800'
         run: python3 .github/scripts/monitor-production-logs.py
 
       - name: Persist monitor state
-        if: always() && (github.event_name != 'workflow_dispatch' || inputs.dry_run != true)
+        if: >-
+          always() &&
+          (github.event_name != 'workflow_dispatch' ||
+           (inputs.dry_run != true && inputs.send_test_alert != true))
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: production-log-monitor-state

@@ -48,6 +48,19 @@ class MonitorProductionLogsTest(unittest.TestCase):
         self.assertIn("AI summary", message)
         self.assertLessEqual(len(message), 1950)
 
+    def test_synthetic_alert_is_clearly_labeled(self):
+        summary = {
+            "count": 1,
+            "statuses": [["500", 1]],
+            "routes": [["/synthetic-monitor-test", 1]],
+            "events": [["monitor.synthetic_test", 1]],
+            "error_types": [],
+            "synthetic_test": True,
+        }
+        message = monitor.discord_message("firing", summary, "ทดสอบระบบ", 300)
+        self.assertIn("monitor test alert", message)
+        self.assertNotIn("production alert", message)
+
 
 if __name__ == "__main__":
     unittest.main()

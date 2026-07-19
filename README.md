@@ -436,7 +436,7 @@ Secret:   DISCORD_WEBHOOK_URL
 Variable: AI_LOG_SUMMARY_URL=https://api.panyakorn.com/api/ai/generate
 ```
 
-Use **Production Log Monitor → Run workflow → dry_run=true** to verify Loki access and the sanitized aggregate without sending Discord or updating incident state.
+Use **Production Log Monitor → Run workflow → dry_run=true** to verify Loki access and the sanitized aggregate without sending Discord or updating incident state. To verify the complete AI-to-Discord path safely, set `dry_run=false` and `send_test_alert=true`; the message is explicitly labeled as synthetic and does not change incident state.
 
 ## CI/CD and production deployment
 
