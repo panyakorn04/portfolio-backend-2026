@@ -278,12 +278,8 @@ func portfolioChatVisitorSecret(svcCtx *svc.ServiceContext) string {
 	if secret := strings.TrimSpace(svcCtx.Config.PortfolioChatVisitorSecret); secret != "" {
 		return secret
 	}
-	if secret := strings.TrimSpace(svcCtx.Config.SupabaseServiceRoleKey); secret != "" {
-		return secret
-	}
-	if secret := strings.TrimSpace(svcCtx.Config.AdminApiToken); secret != "" {
-		return secret
-	}
+	// NewServiceContext rejects this fallback in production. It exists only for
+	// explicit dev/test configurations so local setup remains frictionless.
 	return "portfolio-chat-development-secret"
 }
 
