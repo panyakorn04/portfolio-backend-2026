@@ -1,6 +1,9 @@
 package logic
 
-import "testing"
+import (
+	"strings"
+	"testing"
+)
 
 func TestValidateContactSubmission(t *testing.T) {
 	tests := []struct {
@@ -28,6 +31,18 @@ func TestValidateContactSubmission(t *testing.T) {
 				Subject: "Hello", Message: "This is a sufficiently long message body.",
 			},
 			wantDetails: 1,
+		},
+		{
+			name: "bounded fields and locale",
+			in: ContactSubmission{
+				Name:    strings.Repeat("n", MaxContactNameRunes+1),
+				Email:   strings.Repeat("e", MaxContactEmailRunes) + "@x",
+				Company: strings.Repeat("c", MaxContactCompanyRunes+1),
+				Subject: strings.Repeat("s", MaxContactSubjectRunes+1),
+				Message: strings.Repeat("m", MaxContactMessageRunes+1),
+				Locale:  "fr",
+			},
+			wantDetails: 6,
 		},
 	}
 

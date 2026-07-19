@@ -20,6 +20,8 @@ const (
 	loginRateWindow      = 15 * time.Minute
 	studioMutationLimit  = 30
 	studioMutationWindow = time.Minute
+	contactRateLimit     = 5
+	contactRateWindow    = 10 * time.Minute
 )
 
 type rateWindow struct {
@@ -28,8 +30,9 @@ type rateWindow struct {
 }
 
 type memoryRateLimiter struct {
-	mu      sync.Mutex
-	windows map[string]rateWindow
+	mu        sync.Mutex
+	windows   map[string]rateWindow
+	lastSweep time.Time
 }
 
 func newMemoryRateLimiter() *memoryRateLimiter {
@@ -39,6 +42,14 @@ func newMemoryRateLimiter() *memoryRateLimiter {
 func (l *memoryRateLimiter) Allow(key string, limit int, window time.Duration, now time.Time) (bool, time.Duration) {
 	l.mu.Lock()
 	defer l.mu.Unlock()
+	if l.lastSweep.IsZero() || now.Sub(l.lastSweep) >= time.Minute {
+		for existingKey, existing := range l.windows {
+			if !now.Before(existing.reset) {
+				delete(l.windows, existingKey)
+			}
+		}
+		l.lastSweep = now
+	}
 	v := l.windows[key]
 	if v.reset.IsZero() || !now.Before(v.reset) {
 		l.windows[key] = rateWindow{count: 1, reset: now.Add(window)}
@@ -120,6 +131,15 @@ func enforceLoginRateLimit(w http.ResponseWriter, r *http.Request, s *svc.Servic
 	ip := clientIP(r, s != nil && s.Config.TrustProxy)
 	blocked, retry := limited(s, "login:ip:"+ip, loginRateLimit, loginRateWindow, time.Now())
 	if blocked {
+		writeRateLimited(w, retry)
+		return false
+	}
+	return true
+}
+
+func enforceContactRateLimit(w http.ResponseWriter, r *http.Request, s *svc.ServiceContext) bool {
+	ip := clientIP(r, s != nil && s.Config.TrustProxy)
+	if blocked, retry := limited(s, "contact:ip:"+ip, contactRateLimit, contactRateWindow, time.Now()); blocked {
 		writeRateLimited(w, retry)
 		return false
 	}

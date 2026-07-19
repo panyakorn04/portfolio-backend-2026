@@ -13,6 +13,8 @@ import (
 	"portfolio-backend/internal/svc"
 )
 
+const maxContactBodyBytes int64 = 8 * 1024
+
 func HealthHandler(svcCtx *svc.ServiceContext) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		type supabaseStatus struct {
@@ -60,8 +62,11 @@ func HealthHandler(svcCtx *svc.ServiceContext) http.HandlerFunc {
 
 func ContactHandler(svcCtx *svc.ServiceContext) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
+		if !enforceContactRateLimit(w, r, svcCtx) {
+			return
+		}
 		var body logic.ContactSubmission
-		if !decodeJSON(w, r, &body) {
+		if !decodeJSONWithLimit(w, r, &body, maxContactBodyBytes) {
 			return
 		}
 
