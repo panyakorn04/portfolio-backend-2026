@@ -341,7 +341,7 @@ Admin routes accept either the `portfolio_admin_session` cookie or `Authorizatio
 
 `pause` and `approve` execution routes remain registered as explicit legacy command shapes but fail closed with `409`; they are not available runtime transitions.
 
-The internal endpoint `POST /api/jobs/contact-follow-up` requires `INTERNAL_API_TOKEN` bearer authentication.
+The internal endpoint `POST /api/jobs/contact-follow-up` requires `INTERNAL_API_TOKEN` bearer authentication and currently fails closed with `501 Not Implemented`; it never claims that work was queued until a durable processor exists.
 
 ## Persistence and migrations
 
