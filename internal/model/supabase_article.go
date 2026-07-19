@@ -30,6 +30,11 @@ func NewSupabaseArticleClient(baseURL, key string) *SupabaseArticleClient {
 }
 
 func (c *SupabaseArticleClient) request(ctx context.Context, table string, values url.Values, out any) error {
+	_, err := c.requestWithPrefer(ctx, table, values, "", out)
+	return err
+}
+
+func (c *SupabaseArticleClient) requestWithPrefer(ctx context.Context, table string, values url.Values, prefer string, out any) (http.Header, error) {
 	u := c.baseURL + "/" + table
 	if encoded := values.Encode(); encoded != "" {
 		u += "?" + encoded
@@ -37,22 +42,28 @@ func (c *SupabaseArticleClient) request(ctx context.Context, table string, value
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, u, nil)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	req.Header.Set("apikey", c.key)
 	req.Header.Set("Authorization", "Bearer "+c.key)
 	req.Header.Set("Accept", "application/json")
+	if prefer != "" {
+		req.Header.Set("Prefer", prefer)
+	}
 
 	resp, err := c.http.Do(req)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	defer resp.Body.Close()
 
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return fmt.Errorf("supabase %s returned %s", table, resp.Status)
+		return nil, fmt.Errorf("supabase %s returned %s", table, resp.Status)
 	}
-	return json.NewDecoder(resp.Body).Decode(out)
+	if err := json.NewDecoder(resp.Body).Decode(out); err != nil {
+		return nil, err
+	}
+	return resp.Header.Clone(), nil
 }
 
 type supabaseArticleRow struct {
@@ -190,6 +201,22 @@ func (c *SupabaseArticleClient) ListPublished(ctx context.Context, limit *int) (
 		return nil, err
 	}
 	return articles, nil
+}
+
+func (c *SupabaseArticleClient) CountPublishedForLocale(ctx context.Context, locale string) (int, error) {
+	values := url.Values{}
+	values.Set("select", "id,Article!inner(id)")
+	values.Set("locale", "eq."+locale)
+	values.Set("Article.status", "eq.published")
+	values.Set("limit", "1")
+	var rows []struct {
+		ID string `json:"id"`
+	}
+	header, err := c.requestWithPrefer(ctx, "ArticleTranslation", values, "count=exact", &rows)
+	if err != nil {
+		return 0, err
+	}
+	return exactCountFromHeader(header, len(rows)), nil
 }
 
 func (c *SupabaseArticleClient) FindPublishedBySlug(ctx context.Context, slug string) (*Article, error) {

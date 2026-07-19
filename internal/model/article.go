@@ -121,6 +121,22 @@ func (m *ArticleModel) ListPublished(ctx context.Context, limit *int) ([]Article
 	return m.listWithValues(ctx, values)
 }
 
+func (m *ArticleModel) CountPublishedForLocale(ctx context.Context, locale string) (int, error) {
+	values := url.Values{}
+	values.Set("select", "id,Article!inner(id)")
+	values.Set("locale", "eq."+locale)
+	values.Set("Article.status", "eq.published")
+	values.Set("limit", "1")
+	var rows []struct {
+		ID string `json:"id"`
+	}
+	resp, err := m.api.request(ctx, http.MethodGet, "ArticleTranslation", values, nil, "count=exact", &rows)
+	if err != nil {
+		return 0, err
+	}
+	return exactCount(resp, len(rows)), nil
+}
+
 func (m *ArticleModel) FindPublishedBySlug(ctx context.Context, slug string) (*Article, error) {
 	values := url.Values{}
 	values.Set("slug", "eq."+slug)

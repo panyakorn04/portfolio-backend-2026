@@ -388,7 +388,7 @@ All runtime persistence is server-side through the Supabase `service_role`. Migr
 
 When Redis is enabled, successful public article responses are cached for:
 
-- `GET /api/articles?lang=...&limit=...`
+- `GET /api/articles?lang=...&limit=...` (`limit` defaults to 20 and is capped at 100; totals use an exact bounded PostgREST count)
 - `GET /api/articles/:slug?lang=...`
 
 The default TTL is five minutes. Redis failures are non-fatal for article reads; the API falls back to Supabase REST. Admin article mutations clear `portfolio:articles:*` keys.
