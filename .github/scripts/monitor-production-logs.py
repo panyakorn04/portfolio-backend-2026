@@ -250,13 +250,13 @@ def query_loki_page(
         raise RuntimeError("Loki query response result is malformed")
     for stream in results:
         if not isinstance(stream, dict):
-            continue
+            raise RuntimeError("Loki query stream is malformed")
         values = stream.get("values", [])
         if not isinstance(values, list):
-            continue
+            raise RuntimeError("Loki query values are malformed")
         for value in values:
             if not isinstance(value, list) or len(value) != 2:
-                continue
+                raise RuntimeError("Loki query log entry is malformed")
             raw_count += 1
             record = parse_log_line(value[1])
             if record is not None:
