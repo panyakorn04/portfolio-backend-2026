@@ -425,6 +425,19 @@ Example Grafana Explore query:
 {application="portfolio-api", environment="production"} | json
 ```
 
+### AI-assisted production alerts
+
+`.github/workflows/production-log-monitor.yml` queries the bounded production Loki stream every five minutes. Detection is deterministic: any HTTP status `>= 500`, error/fatal/panic level, or stable `*.failed` event opens an incident. The workflow sends only aggregate counts for statuses, registered route patterns, event names, and Go error types to the configured portfolio Ollama endpoint for a short Thai summary; raw log lines, request IDs, bodies, headers, cookies, and user data are never sent to AI or Discord.
+
+The first incident sends a Discord alert, an active incident is reminded at most every 30 minutes, and the first clean interval sends a recovery notification. State is carried between workflow runs through a seven-day GitHub Actions artifact. Configure these repository settings:
+
+```text
+Secret:   DISCORD_WEBHOOK_URL
+Variable: AI_LOG_SUMMARY_URL=https://api.panyakorn.com/api/ai/generate
+```
+
+Use **Production Log Monitor → Run workflow → dry_run=true** to verify Loki access and the sanitized aggregate without sending Discord or updating incident state.
+
 ## CI/CD and production deployment
 
 `.github/workflows/ci.yml` runs for pull requests, pushes to `main`, and manual dispatches.

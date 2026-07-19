@@ -1,0 +1,70 @@
+name: Production Log Monitor
+
+on:
+  schedule:
+    - cron: '*/5 * * * *'
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: Query and summarize logs without sending Discord or updating state
+        type: boolean
+        default: true
+
+permissions:
+  actions: read
+  contents: read
+
+concurrency:
+  group: production-log-monitor
+  cancel-in-progress: false
+
+jobs:
+  monitor:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+
+      - name: Restore monitor state
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          mkdir -p .monitor-state
+          while IFS= read -r run_id; do
+            [ -n "$run_id" ] || continue
+            if gh run download "$run_id" \
+              --name production-log-monitor-state \
+              --dir .monitor-state >/dev/null 2>&1; then
+              echo "Restored state from run $run_id"
+              break
+            fi
+          done < <(
+            gh run list \
+              --workflow production-log-monitor.yml \
+              --status completed \
+              --limit 10 \
+              --json databaseId \
+              --jq '.[].databaseId'
+          )
+
+      - name: Query Loki, summarize incidents, and notify Discord
+        env:
+          GRAFANA_LOKI_URL: ${{ secrets.GRAFANA_LOKI_URL }}
+          GRAFANA_LOKI_USERNAME: ${{ secrets.GRAFANA_LOKI_USERNAME }}
+          GRAFANA_LOKI_TOKEN: ${{ secrets.GRAFANA_LOKI_TOKEN }}
+          DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
+          AI_LOG_SUMMARY_URL: ${{ vars.AI_LOG_SUMMARY_URL }}
+          MONITOR_DRY_RUN: ${{ github.event_name == 'workflow_dispatch' && inputs.dry_run || false }}
+          MONITOR_STATE_FILE: .monitor-state/state.json
+          MONITOR_REMINDER_SECONDS: '1800'
+        run: python3 .github/scripts/monitor-production-logs.py
+
+      - name: Persist monitor state
+        if: always() && (github.event_name != 'workflow_dispatch' || inputs.dry_run != true)
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: production-log-monitor-state
+          path: .monitor-state/state.json
+          if-no-files-found: error
+          retention-days: 7
