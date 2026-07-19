@@ -20,10 +20,6 @@ on:
         description: Production migrations in this release were manually applied and verified
         type: boolean
         default: false
-      emergency_override:
-        description: Bypass the protected deployment window for an approved emergency
-        type: boolean
-        default: false
 
 permissions:
   contents: read
@@ -156,7 +152,6 @@ jobs:
       previous_image: ${{ steps.preflight.outputs.previous_image }}
       rollback_worthy: ${{ steps.preflight.outputs.rollback_worthy }}
       migrations: ${{ steps.preflight.outputs.migrations }}
-      window_ok: ${{ steps.preflight.outputs.window_ok }}
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
@@ -170,8 +165,6 @@ jobs:
           REQUESTED_IMAGE_SHA: ${{ inputs.image_sha }}
           BEFORE_SHA: ${{ github.event.before }}
           MIGRATION_VERIFIED: ${{ inputs.migration_verified }}
-          EMERGENCY_OVERRIDE: ${{ inputs.emergency_override }}
-          DEPLOY_TIMEZONE: ${{ vars.DEPLOY_TIMEZONE }}
           DEPLOY_HEALTH_URL: ${{ vars.BACKEND_HEALTH_URL }}
           DEPLOY_COMPOSE_FILES: ${{ vars.BACKEND_COMPOSE_FILES }}
           DEPLOY_SERVICE: ${{ vars.BACKEND_COMPOSE_SERVICE }}
@@ -179,9 +172,8 @@ jobs:
         run: bash .github/scripts/deploy-preflight.sh
 
   deploy:
-    if: >-
-      always() && needs.deploy-preflight.result == 'success' &&
-      needs.deploy-preflight.outputs.window_ok == 'true'
+    name: Deploy production (approval required)
+    if: always() && needs.deploy-preflight.result == 'success'
     needs: [deploy-preflight]
     runs-on: ubuntu-latest
     timeout-minutes: 30

@@ -452,7 +452,7 @@ ghcr.io/panyakorn04/portfolio-backend-2026:<full-commit-sha>
 
 There is no mutable `latest` deployment tag. Production deploys select the exact commit image, authenticate to GHCR with the short-lived repository `GITHUB_TOKEN`, and remove the temporary Docker credential directory afterward.
 
-Before the protected `production` approval, rollout preflight verifies the safe deployment window, immutable release image, pullable previous successful image, required repository assets, and migration state. Pushes that add migrations stop before approval; after applying and verifying those migrations manually, rerun with `migration_verified` enabled. Approved emergency or rollback dispatches can bypass the normal deployment window explicitly.
+Before the protected `production` approval, rollout preflight verifies the immutable release image, pullable previous successful image, required repository assets, and migration state. Pushes that add migrations stop before approval; after applying and verifying those migrations manually, rerun with `migration_verified` enabled. Every production deploy and rollback then waits for a required reviewer to approve the protected `production` environment; there is no time-based deployment window or emergency time override.
 
 The versioned deploy script:
 
@@ -496,7 +496,6 @@ BACKEND_HEALTH_URL
 BACKEND_COMPOSE_FILES
 BACKEND_COMPOSE_SERVICE
 BACKEND_IMAGE_VARIABLE
-DEPLOY_TIMEZONE
 ```
 
 These operational values are configured in repository Settings rather than hardcoded into the workflow.

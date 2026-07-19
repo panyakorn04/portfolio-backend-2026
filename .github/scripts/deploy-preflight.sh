@@ -11,8 +11,6 @@ set -Eeuo pipefail
 : "${GITHUB_STEP_SUMMARY:?GITHUB_STEP_SUMMARY is required}"
 
 ACTION="${ACTION:-deploy}"
-DEPLOY_TIMEZONE="${DEPLOY_TIMEZONE:-Asia/Bangkok}"
-EMERGENCY_OVERRIDE="${EMERGENCY_OVERRIDE:-false}"
 MIGRATION_VERIFIED="${MIGRATION_VERIFIED:-false}"
 BEFORE_SHA="${BEFORE_SHA:-}"
 REQUESTED_IMAGE_SHA="${REQUESTED_IMAGE_SHA:-}"
@@ -35,19 +33,6 @@ required_assets=(
 for asset in "${required_assets[@]}"; do
   [ -r "$asset" ] || { echo "Missing required deployment asset: $asset" >&2; exit 1; }
 done
-
-echo "Checking deployment window in $DEPLOY_TIMEZONE"
-window_ok=true
-if [ "$ACTION" != rollback ] && [ "$EMERGENCY_OVERRIDE" != true ]; then
-  day="$(TZ="$DEPLOY_TIMEZONE" date +%u)"
-  hour="$(TZ="$DEPLOY_TIMEZONE" date +%H)"
-  if [ "$day" -eq 5 ] && [ "$hour" -ge 15 ]; then window_ok=false; fi
-  if [ "$day" -eq 6 ] || [ "$day" -eq 7 ]; then window_ok=false; fi
-  if [ "$day" -eq 1 ] && [ "$hour" -lt 8 ]; then window_ok=false; fi
-fi
-if [ "$window_ok" != true ]; then
-  echo "Deployment is a controlled NO-GO outside the safe window; production will remain unchanged"
-fi
 
 http_code="$(curl --silent --show-error --output /dev/null --write-out '%{http_code}' --max-time 10 https://ghcr.io/v2/ || true)"
 [ -n "$http_code" ] && [ "$http_code" != 000 ] || { echo "GHCR is unreachable" >&2; exit 1; }
@@ -110,23 +95,18 @@ fi
   echo "previous_image=$previous_image"
   echo "rollback_worthy=$rollback_worthy"
   echo "migrations=${migrations:-none}"
-  echo "window_ok=$window_ok"
 } >> "$GITHUB_OUTPUT"
 
-decision="GO"
-if [ "$window_ok" != true ]; then
-  decision="NO-GO (deployment window)"
-fi
-
 {
-  echo "## Production rollout preflight: $decision"
+  echo "## Production rollout preflight: ready for approval"
   echo
   echo "| Check | Result |"
   echo "|---|---|"
-  echo "| Deployment window | $window_ok ($DEPLOY_TIMEZONE) |"
   echo "| Release image | \`$current_image\` |"
   echo "| Rollback image | \`${previous_image:-first deployment}\` |"
   echo "| Rollback worthy | $rollback_worthy |"
   echo "| Migrations | \`${migrations:-none}\` |"
   echo "| Health target | $DEPLOY_HEALTH_URL |"
+  echo
+  echo "Production remains unchanged until a required reviewer approves the protected \`production\` environment."
 } >> "$GITHUB_STEP_SUMMARY"
