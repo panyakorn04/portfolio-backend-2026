@@ -23,10 +23,9 @@ DEFAULT_REMINDER_SECONDS = 1800
 MAX_LINES = 5000
 MAX_QUERY_SPLITS = 20
 MAX_QUERY_PAGES = 128
-SAFE_ROUTE = re.compile(r"^(?:unmatched|/[A-Za-z0-9_./:-]{1,159})$")
-SAFE_EVENT = re.compile(r"^[a-z][a-z0-9_.-]{0,127}$")
-SAFE_ERROR_TYPE = re.compile(r"^[A-Za-z0-9_.*\[\]/-]{1,160}$")
 REDACTED = "redacted"
+ERROR_TYPE_PRESENT = "present"
+EVENT_LITERAL = re.compile(r'^[a-z][a-z0-9_.-]{0,127}$')
 
 
 def env(name: str, *, required: bool = True, default: str = "") -> str:
@@ -85,17 +84,51 @@ def safe_status(value: Any) -> int | None:
     return status if 100 <= status <= 599 else None
 
 
-def safe_dimension(value: Any, pattern: re.Pattern[str]) -> str:
+def allowlisted_dimension(value: Any, allowed: frozenset[str]) -> str:
     text = str(value).strip()
     if not text:
         return ""
-    return text if pattern.fullmatch(text) else REDACTED
+    return text if text in allowed else REDACTED
 
 
-def is_incident(record: dict[str, Any]) -> bool:
+def load_dimension_allowlists(repo_root: Path) -> tuple[frozenset[str], frozenset[str]]:
+    api_path = repo_root / "portfolio.api"
+    try:
+        api_source = api_path.read_text()
+    except OSError as error:
+        raise RuntimeError("Unable to load the trusted route allowlist source") from error
+    routes = {
+        match.group(1)
+        for match in re.finditer(r"^\s*(?:get|post|put|patch|delete)\s+(/\S+)", api_source, re.MULTILINE)
+    }
+    if not routes:
+        raise RuntimeError("Trusted route allowlist is empty")
+    routes.add("unmatched")
+
+    events: set[str] = set()
+    try:
+        go_files = list((repo_root / "internal").rglob("*.go"))
+        for path in go_files:
+            source = path.read_text()
+            events.update(re.findall(r'logx\.Field\("event",\s*"([a-zA-Z0-9_.-]+)"\)', source))
+            events.update(
+                re.findall(
+                    r'observability\.(?:Error|ErrorType)\([^,]+,\s*"([a-zA-Z0-9_.-]+)"\s*,',
+                    source,
+                )
+            )
+    except OSError as error:
+        raise RuntimeError("Unable to load the trusted event allowlist source") from error
+    events = {event for event in events if EVENT_LITERAL.fullmatch(event)}
+    if not events:
+        raise RuntimeError("Trusted event allowlist is empty")
+    return frozenset(routes), frozenset(events)
+
+
+def is_incident(record: dict[str, Any], allowed_events: frozenset[str]) -> bool:
     status = safe_status(record.get("status"))
     level = str(record.get("level", "")).lower()
-    event = safe_dimension(record.get("event", ""), SAFE_EVENT).lower()
+    event = allowlisted_dimension(record.get("event", ""), allowed_events).lower()
     return bool(
         (status is not None and status >= 500)
         or level in {"error", "fatal", "panic"}
@@ -104,8 +137,12 @@ def is_incident(record: dict[str, Any]) -> bool:
     )
 
 
-def aggregate_incidents(records: list[dict[str, Any]]) -> dict[str, Any]:
-    incidents = [record for record in records if is_incident(record)]
+def aggregate_incidents(
+    records: list[dict[str, Any]],
+    allowed_routes: frozenset[str],
+    allowed_events: frozenset[str],
+) -> dict[str, Any]:
+    incidents = [record for record in records if is_incident(record, allowed_events)]
     statuses: Counter[str] = Counter()
     routes: Counter[str] = Counter()
     events: Counter[str] = Counter()
@@ -115,15 +152,24 @@ def aggregate_incidents(records: list[dict[str, Any]]) -> dict[str, Any]:
         status = safe_status(record.get("status"))
         if status is not None and status >= 500:
             statuses[str(status)] += 1
-        route = safe_dimension(record.get("route", ""), SAFE_ROUTE)
+        route = allowlisted_dimension(record.get("route", ""), allowed_routes)
         if route:
             routes[route] += 1
-        event = safe_dimension(record.get("event", ""), SAFE_EVENT)
+        event = allowlisted_dimension(record.get("event", ""), allowed_events)
         if event:
             events[event] += 1
-        error_type = safe_dimension(record.get("error_type", ""), SAFE_ERROR_TYPE)
-        if error_type:
-            error_types[error_type] += 1
+        if str(record.get("error_type", "")).strip():
+            error_types[ERROR_TYPE_PRESENT] += 1
+
+    signature_dimensions = {
+        "statuses": sorted(statuses),
+        "routes": sorted(routes),
+        "events": sorted(events),
+        "error_types": sorted(error_types),
+    }
+    signature = hashlib.sha256(
+        json.dumps(signature_dimensions, sort_keys=True, separators=(",", ":")).encode()
+    ).hexdigest()[:16]
 
     return {
         "count": len(incidents),
@@ -131,16 +177,24 @@ def aggregate_incidents(records: list[dict[str, Any]]) -> dict[str, Any]:
         "routes": routes.most_common(10),
         "events": events.most_common(10),
         "error_types": error_types.most_common(10),
+        "_fingerprint": signature,
     }
 
 
 def fingerprint(summary: dict[str, Any]) -> str:
+    stored = summary.get("_fingerprint")
+    if isinstance(stored, str) and re.fullmatch(r"[0-9a-f]{16}", stored):
+        return stored
     dimensions = {
         key: sorted(str(item[0]) for item in summary.get(key, []))
         for key in ("statuses", "routes", "events", "error_types")
     }
     canonical = json.dumps(dimensions, sort_keys=True, separators=(",", ":"))
     return hashlib.sha256(canonical.encode()).hexdigest()[:16]
+
+
+def public_summary(summary: dict[str, Any]) -> dict[str, Any]:
+    return {key: value for key, value in summary.items() if not key.startswith("_")}
 
 
 def load_state(path: Path) -> dict[str, Any]:
@@ -178,7 +232,7 @@ def ai_summary(summary: dict[str, Any], ai_url: str) -> str:
         "คุณเป็น production incident analyst สรุปข้อมูล aggregate ต่อไปนี้เป็นภาษาไทยไม่เกิน 500 ตัวอักษร "
         "ระบุผลกระทบที่เป็นไปได้ จุดที่ควรตรวจ และห้ามเดาสาเหตุที่ไม่มีหลักฐาน "
         "ข้อมูลไม่มี raw logs หรือข้อมูลผู้ใช้:\n"
-        + json.dumps(summary, ensure_ascii=False, separators=(",", ":"))
+        + json.dumps(public_summary(summary), ensure_ascii=False, separators=(",", ":"))
     )
     response = request_json(ai_url, method="POST", body={"prompt": prompt}, timeout=120)
     if not isinstance(response, dict) or not isinstance(response.get("data"), dict):
@@ -245,13 +299,17 @@ def query_loki_page(
     data = response.get("data")
     if not isinstance(data, dict):
         raise RuntimeError("Loki query response data is malformed")
-    results = data.get("result", [])
+    if "result" not in data:
+        raise RuntimeError("Loki query response result is missing")
+    results = data["result"]
     if not isinstance(results, list):
         raise RuntimeError("Loki query response result is malformed")
     for stream in results:
         if not isinstance(stream, dict):
             raise RuntimeError("Loki query stream is malformed")
-        values = stream.get("values", [])
+        if "values" not in stream:
+            raise RuntimeError("Loki query values are missing")
+        values = stream["values"]
         if not isinstance(values, list):
             raise RuntimeError("Loki query values are malformed")
         for value in values:
@@ -259,8 +317,9 @@ def query_loki_page(
                 raise RuntimeError("Loki query log entry is malformed")
             raw_count += 1
             record = parse_log_line(value[1])
-            if record is not None:
-                records.append(record)
+            if record is None:
+                raise RuntimeError("Loki query returned an unparseable structured log entry")
+            records.append(record)
     return records, raw_count
 
 
@@ -330,6 +389,8 @@ def main() -> int:
     previous_checked = int(state.get("last_checked_at", 0))
     start_seconds = max(previous_checked - 30, now - 900) if previous_checked else now - DEFAULT_LOOKBACK_SECONDS
     try:
+        repo_root = Path(__file__).resolve().parents[2]
+        allowed_routes, allowed_events = load_dimension_allowlists(repo_root)
         records = query_loki(push_url, username, token, start_seconds * 1_000_000_000, now * 1_000_000_000)
     except Exception as error:
         failure = monitor_failure_message(error)
@@ -338,7 +399,7 @@ def main() -> int:
         else:
             send_discord(webhook_url, failure)
         raise RuntimeError("Loki monitoring query failed") from error
-    summary = aggregate_incidents(records)
+    summary = aggregate_incidents(records, allowed_routes, allowed_events)
     if test_alert:
         summary = {
             "count": 1,
@@ -351,7 +412,7 @@ def main() -> int:
         kind = "firing"
     else:
         kind = notification_kind(summary, state, now, reminder_seconds)
-    print(json.dumps({"kind": kind, "summary": summary}, ensure_ascii=False))
+    print(json.dumps({"kind": kind, "summary": public_summary(summary)}, ensure_ascii=False))
 
     analysis = ""
     if kind in {"firing", "changed", "reminder"}:
