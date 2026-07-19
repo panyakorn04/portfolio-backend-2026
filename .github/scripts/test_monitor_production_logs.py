@@ -93,6 +93,12 @@ class MonitorProductionLogsTest(unittest.TestCase):
             with self.assertRaisesRegex(RuntimeError, "truncated"):
                 monitor.query_loki("https://logs.example/loki/api/v1/push", "user", "token", 1, 1)
 
+    def test_loki_malformed_stream_fails_closed(self):
+        malformed = {"status": "success", "data": {"result": ["not-a-stream"]}}
+        with mock.patch.object(monitor, "request_json", return_value=malformed):
+            with self.assertRaisesRegex(RuntimeError, "stream is malformed"):
+                monitor.query_loki_page("https://logs.example/query_range", "auth", 0, 1)
+
     def test_monitor_failure_message_does_not_expose_error_text(self):
         message = monitor.monitor_failure_message(RuntimeError("token=secret-value"))
         self.assertIn("RuntimeError", message)
