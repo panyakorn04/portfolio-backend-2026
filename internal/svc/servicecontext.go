@@ -1,6 +1,8 @@
 package svc
 
 import (
+	"errors"
+	"strings"
 	"time"
 
 	"portfolio-backend/internal/cache"
@@ -31,6 +33,9 @@ type ServiceContext struct {
 }
 
 func NewServiceContext(c config.Config) (*ServiceContext, error) {
+	if c.Mode == "pro" && strings.TrimSpace(c.PortfolioChatVisitorSecret) == "" {
+		return nil, errors.New("PORTFOLIO_CHAT_VISITOR_SECRET is required in production")
+	}
 	svc := &ServiceContext{Config: c}
 	if c.StudioCredentialEncryptionKey != "" {
 		credentialCipher, err := security.NewCredentialCipher(c.StudioCredentialEncryptionKey)

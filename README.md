@@ -227,7 +227,7 @@ openssl rand -base64 48  # STUDIO_WEBHOOK_SIGNING_KEY or visitor secret
 | `OLLAMA_MODEL` | Default Ollama model |
 | `OLLAMA_ALLOWED_MODELS` | Comma-separated public chat model allowlist; defaults to the pinned model when empty |
 | `AI_SKILLS_DIR` | Root directory for mounted AI skill profiles |
-| `PORTFOLIO_CHAT_VISITOR_SECRET` | HMAC key used before visitor identifiers reach the database |
+| `PORTFOLIO_CHAT_VISITOR_SECRET` | Dedicated HMAC key used before visitor identifiers reach the database; mandatory in `pro` mode and never derived from another credential |
 | `PORTFOLIO_CHAT_SESSION_TTL_HOURS` | Intended anonymous-session lifetime; production default is 2160 hours |
 | `PORTFOLIO_CHAT_MAX_STORED_MESSAGES` | Intended per-session history cap; production default is 100 |
 
