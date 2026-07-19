@@ -7,6 +7,7 @@ import base64
 import hashlib
 import json
 import os
+import re
 import sys
 import time
 import urllib.error
@@ -20,6 +21,12 @@ STREAM_SELECTOR = '{application="portfolio-api",environment="production"}'
 DEFAULT_LOOKBACK_SECONDS = 300
 DEFAULT_REMINDER_SECONDS = 1800
 MAX_LINES = 5000
+MAX_QUERY_SPLITS = 20
+MAX_QUERY_PAGES = 128
+SAFE_ROUTE = re.compile(r"^(?:unmatched|/[A-Za-z0-9_./:-]{1,159})$")
+SAFE_EVENT = re.compile(r"^[a-z][a-z0-9_.-]{0,127}$")
+SAFE_ERROR_TYPE = re.compile(r"^[A-Za-z0-9_.*\[\]/-]{1,160}$")
+REDACTED = "redacted"
 
 
 def env(name: str, *, required: bool = True, default: str = "") -> str:
@@ -36,7 +43,7 @@ def request_json(
     headers: dict[str, str] | None = None,
     body: dict[str, Any] | None = None,
     timeout: int = 30,
-) -> dict[str, Any]:
+) -> Any:
     data = None
     request_headers = {
         "Accept": "application/json",
@@ -78,10 +85,17 @@ def safe_status(value: Any) -> int | None:
     return status if 100 <= status <= 599 else None
 
 
+def safe_dimension(value: Any, pattern: re.Pattern[str]) -> str:
+    text = str(value).strip()
+    if not text:
+        return ""
+    return text if pattern.fullmatch(text) else REDACTED
+
+
 def is_incident(record: dict[str, Any]) -> bool:
     status = safe_status(record.get("status"))
     level = str(record.get("level", "")).lower()
-    event = str(record.get("event", "")).lower()
+    event = safe_dimension(record.get("event", ""), SAFE_EVENT).lower()
     return bool(
         (status is not None and status >= 500)
         or level in {"error", "fatal", "panic"}
@@ -101,15 +115,15 @@ def aggregate_incidents(records: list[dict[str, Any]]) -> dict[str, Any]:
         status = safe_status(record.get("status"))
         if status is not None and status >= 500:
             statuses[str(status)] += 1
-        route = str(record.get("route", "")).strip()
+        route = safe_dimension(record.get("route", ""), SAFE_ROUTE)
         if route:
-            routes[route[:160]] += 1
-        event = str(record.get("event", "")).strip()
+            routes[route] += 1
+        event = safe_dimension(record.get("event", ""), SAFE_EVENT)
         if event:
-            events[event[:160]] += 1
-        error_type = str(record.get("error_type", "")).strip()
+            events[event] += 1
+        error_type = safe_dimension(record.get("error_type", ""), SAFE_ERROR_TYPE)
         if error_type:
-            error_types[error_type[:160]] += 1
+            error_types[error_type] += 1
 
     return {
         "count": len(incidents),
@@ -121,7 +135,11 @@ def aggregate_incidents(records: list[dict[str, Any]]) -> dict[str, Any]:
 
 
 def fingerprint(summary: dict[str, Any]) -> str:
-    canonical = json.dumps(summary, sort_keys=True, separators=(",", ":"))
+    dimensions = {
+        key: sorted(str(item[0]) for item in summary.get(key, []))
+        for key in ("statuses", "routes", "events", "error_types")
+    }
+    canonical = json.dumps(dimensions, sort_keys=True, separators=(",", ":"))
     return hashlib.sha256(canonical.encode()).hexdigest()[:16]
 
 
@@ -140,6 +158,8 @@ def notification_kind(
     count = int(summary.get("count", 0))
     if count > 0 and not active:
         return "firing"
+    if count > 0 and active and fingerprint(summary) != str(state.get("last_fingerprint", "")):
+        return "changed"
     if count > 0 and active and now - int(state.get("last_alert_at", 0)) >= reminder_seconds:
         return "reminder"
     if count == 0 and active:
@@ -161,8 +181,20 @@ def ai_summary(summary: dict[str, Any], ai_url: str) -> str:
         + json.dumps(summary, ensure_ascii=False, separators=(",", ":"))
     )
     response = request_json(ai_url, method="POST", body={"prompt": prompt}, timeout=120)
-    text = response.get("data", {}).get("response", "") if isinstance(response.get("data"), dict) else ""
-    return str(text).strip()[:700]
+    if not isinstance(response, dict) or not isinstance(response.get("data"), dict):
+        raise ValueError("AI response must contain an object data field")
+    text = response["data"].get("response", "")
+    if not isinstance(text, str) or not text.strip():
+        raise ValueError("AI response text is missing")
+    return text.strip()[:700]
+
+
+def safe_ai_summary(summary: dict[str, Any], ai_url: str) -> str:
+    try:
+        return ai_summary(summary, ai_url)
+    except Exception as error:  # AI enrichment must never block the deterministic alert.
+        print(f"AI summary unavailable: {type(error).__name__}", file=sys.stderr)
+        return "AI summary ใช้งานไม่ได้ชั่วคราว กรุณาตรวจ Grafana ตาม aggregate ด้านบน"
 
 
 def discord_message(kind: str, summary: dict[str, Any], analysis: str, window_seconds: int) -> str:
@@ -172,7 +204,12 @@ def discord_message(kind: str, summary: dict[str, Any], analysis: str, window_se
     if summary.get("synthetic_test"):
         heading = "🧪 **Portfolio API monitor test alert**"
     else:
-        heading = "🚨 **Portfolio API production alert**" if kind == "firing" else "⚠️ **Portfolio API incident reminder**"
+        headings = {
+            "firing": "🚨 **Portfolio API production alert**",
+            "changed": "🆕 **Portfolio API new incident signature**",
+            "reminder": "⚠️ **Portfolio API incident reminder**",
+        }
+        heading = headings.get(kind, headings["reminder"])
     lines = [
         heading,
         f"Window: last {window_seconds // 60} minutes | Incidents: **{summary['count']}**",
@@ -187,8 +224,9 @@ def discord_message(kind: str, summary: dict[str, Any], analysis: str, window_se
     return "\n".join(lines)[:1950]
 
 
-def query_loki(push_url: str, username: str, token: str, start_ns: int, end_ns: int) -> list[dict[str, Any]]:
-    query_url = push_url.removesuffix("/loki/api/v1/push") + "/loki/api/v1/query_range"
+def query_loki_page(
+    query_url: str, auth: str, start_ns: int, end_ns: int
+) -> tuple[list[dict[str, Any]], int]:
     params = urllib.parse.urlencode(
         {
             "query": STREAM_SELECTOR,
@@ -198,18 +236,61 @@ def query_loki(push_url: str, username: str, token: str, start_ns: int, end_ns: 
             "direction": "forward",
         }
     )
-    auth = base64.b64encode(f"{username}:{token}".encode()).decode()
     response = request_json(f"{query_url}?{params}", headers={"Authorization": f"Basic {auth}"})
-    if response.get("status") != "success":
+    if not isinstance(response, dict) or response.get("status") != "success":
         raise RuntimeError("Loki query did not return success")
 
     records: list[dict[str, Any]] = []
-    for stream in response.get("data", {}).get("result", []):
-        for _, raw in stream.get("values", []):
-            record = parse_log_line(raw)
+    raw_count = 0
+    data = response.get("data")
+    if not isinstance(data, dict):
+        raise RuntimeError("Loki query response data is malformed")
+    results = data.get("result", [])
+    if not isinstance(results, list):
+        raise RuntimeError("Loki query response result is malformed")
+    for stream in results:
+        if not isinstance(stream, dict):
+            continue
+        values = stream.get("values", [])
+        if not isinstance(values, list):
+            continue
+        for value in values:
+            if not isinstance(value, list) or len(value) != 2:
+                continue
+            raw_count += 1
+            record = parse_log_line(value[1])
             if record is not None:
                 records.append(record)
-    return records
+    return records, raw_count
+
+
+def query_loki(
+    push_url: str,
+    username: str,
+    token: str,
+    start_ns: int,
+    end_ns: int,
+) -> list[dict[str, Any]]:
+    query_url = push_url.removesuffix("/loki/api/v1/push") + "/loki/api/v1/query_range"
+    auth = base64.b64encode(f"{username}:{token}".encode()).decode()
+    pending = [(start_ns, end_ns, 0)]
+    all_records: list[dict[str, Any]] = []
+    pages = 0
+    while pending:
+        if pages >= MAX_QUERY_PAGES:
+            raise RuntimeError("Loki query exceeded the bounded page budget")
+        interval_start, interval_end, split_depth = pending.pop()
+        records, raw_count = query_loki_page(query_url, auth, interval_start, interval_end)
+        pages += 1
+        if raw_count < MAX_LINES:
+            all_records.extend(records)
+            continue
+        if interval_start >= interval_end or split_depth >= MAX_QUERY_SPLITS:
+            raise RuntimeError("Loki result remained truncated after bounded interval splitting")
+        midpoint = interval_start + (interval_end - interval_start) // 2
+        pending.append((midpoint + 1, interval_end, split_depth + 1))
+        pending.append((interval_start, midpoint, split_depth + 1))
+    return all_records
 
 
 def send_discord(webhook_url: str, content: str) -> None:
@@ -217,6 +298,14 @@ def send_discord(webhook_url: str, content: str) -> None:
         webhook_url + ("&" if "?" in webhook_url else "?") + "wait=true",
         method="POST",
         body={"content": content, "allowed_mentions": {"parse": []}},
+    )
+
+
+def monitor_failure_message(error: Exception) -> str:
+    return (
+        "🔴 **Portfolio API log monitor failure**\n"
+        f"The Loki monitoring query failed safely (`{type(error).__name__}`). "
+        "No incident state was changed; inspect the GitHub Actions run and Grafana availability."
     )
 
 
@@ -240,7 +329,15 @@ def main() -> int:
     state = load_state(state_path)
     previous_checked = int(state.get("last_checked_at", 0))
     start_seconds = max(previous_checked - 30, now - 900) if previous_checked else now - DEFAULT_LOOKBACK_SECONDS
-    records = query_loki(push_url, username, token, start_seconds * 1_000_000_000, now * 1_000_000_000)
+    try:
+        records = query_loki(push_url, username, token, start_seconds * 1_000_000_000, now * 1_000_000_000)
+    except Exception as error:
+        failure = monitor_failure_message(error)
+        if dry_run:
+            print(failure)
+        else:
+            send_discord(webhook_url, failure)
+        raise RuntimeError("Loki monitoring query failed") from error
     summary = aggregate_incidents(records)
     if test_alert:
         summary = {
@@ -257,12 +354,8 @@ def main() -> int:
     print(json.dumps({"kind": kind, "summary": summary}, ensure_ascii=False))
 
     analysis = ""
-    if kind in {"firing", "reminder"}:
-        try:
-            analysis = ai_summary(summary, ai_url)
-        except (RuntimeError, urllib.error.URLError, TimeoutError, ValueError) as error:
-            print(f"AI summary unavailable: {type(error).__name__}", file=sys.stderr)
-            analysis = "AI summary ใช้งานไม่ได้ชั่วคราว กรุณาตรวจ Grafana ตาม aggregate ด้านบน"
+    if kind in {"firing", "changed", "reminder"}:
+        analysis = safe_ai_summary(summary, ai_url)
 
     if kind != "none":
         message = discord_message(kind, summary, analysis, now - start_seconds)
@@ -276,7 +369,7 @@ def main() -> int:
         next_state = {
             "active": summary["count"] > 0,
             "last_checked_at": now,
-            "last_alert_at": now if kind in {"firing", "reminder"} else int(state.get("last_alert_at", 0)),
+            "last_alert_at": now if kind in {"firing", "changed", "reminder"} else int(state.get("last_alert_at", 0)),
             "last_fingerprint": fingerprint(summary) if summary["count"] > 0 else "",
         }
         state_path.write_text(json.dumps(next_state, sort_keys=True) + "\n")

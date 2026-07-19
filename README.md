@@ -429,7 +429,7 @@ Example Grafana Explore query:
 
 `.github/workflows/production-log-monitor.yml` queries the bounded production Loki stream every five minutes. Detection is deterministic: any HTTP status `>= 500`, error/fatal/panic level, or stable `*.failed` event opens an incident. The workflow sends only aggregate counts for statuses, registered route patterns, event names, and Go error types to the configured portfolio Ollama endpoint for a short Thai summary; raw log lines, request IDs, bodies, headers, cookies, and user data are never sent to AI or Discord.
 
-The first incident sends a Discord alert, an active incident is reminded at most every 30 minutes, and the first clean interval sends a recovery notification. State is carried between workflow runs through a seven-day GitHub Actions artifact. Configure these repository settings:
+The first incident sends a Discord alert, a newly observed status/route/event/error-type signature sends an immediate follow-up, an unchanged active incident is reminded at most every 30 minutes, and the first clean interval sends a recovery notification. Loki responses that reach the page limit are split into smaller bounded time ranges instead of being treated as complete; an unsplittable/truncated or unavailable query fails closed and sends a sanitized monitor-failure alert without changing incident state. Route, event, and error-type dimensions must match strict low-cardinality formats or are replaced with `redacted` before AI or Discord sees them. State is carried between workflow runs through a seven-day GitHub Actions artifact. Configure these repository settings:
 
 ```text
 Secret:   DISCORD_WEBHOOK_URL
