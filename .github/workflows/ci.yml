@@ -51,6 +51,8 @@ jobs:
         run: go test ./... -race -count=1 -shuffle=on
       - name: Test production log monitor
         run: python3 .github/scripts/test_monitor_production_logs.py
+      - name: Test backend-only Supabase table contract
+        run: python3 .github/scripts/test_migration_security.py
       - name: Validate deployment scripts
         run: >-
           bash -n

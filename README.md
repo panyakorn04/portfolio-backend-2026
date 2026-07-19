@@ -361,8 +361,11 @@ Apply SQL files from `migrations/` in numeric order. They are additive and cover
 6. Schedule/webhook and execution-ownership security hardening
 7. Admin chat access and status operations
 8. Markdown article content as the authoritative body, with escaped legacy-section backfill
+9. Backend-only table grants and row-level-security enforcement for all application data
 
 GitHub Actions does not apply database migrations. Apply and verify each required migration in Supabase before deploying code that depends on it.
+
+All runtime persistence is server-side through the Supabase `service_role`. Migration `0018_backend_table_access_security.sql` revokes direct `PUBLIC`, `anon`, and `authenticated` access to every application table, enables RLS as defense in depth, and establishes backend-only default table privileges for future migrations. Any future direct-client table must opt in explicitly with reviewed RLS policies.
 
 ## Authentication and security boundaries
 
