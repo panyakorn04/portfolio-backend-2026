@@ -49,6 +49,8 @@ jobs:
         run: go vet ./...
       - name: Test with race detector
         run: go test ./... -race -count=1 -shuffle=on
+      - name: Test production log monitor
+        run: python3 .github/scripts/test_monitor_production_logs.py
       - name: Validate deployment scripts
         run: >-
           bash -n
@@ -58,6 +60,8 @@ jobs:
           .github/scripts/deploy-preflight.sh
           .github/scripts/reconcile-rollout.sh
           .github/scripts/notify-deploy.sh
+      - name: Validate production log monitor workflow
+        run: python3 -m py_compile .github/scripts/monitor-production-logs.py
 
   lint:
     runs-on: ubuntu-latest

@@ -1,0 +1,272 @@
+#!/usr/bin/env python3
+"""Query production Loki logs, summarize incidents, and notify Discord."""
+
+from __future__ import annotations
+
+import base64
+import hashlib
+import json
+import os
+import sys
+import time
+import urllib.error
+import urllib.parse
+import urllib.request
+from collections import Counter
+from pathlib import Path
+from typing import Any
+
+STREAM_SELECTOR = '{application="portfolio-api",environment="production"}'
+DEFAULT_LOOKBACK_SECONDS = 300
+DEFAULT_REMINDER_SECONDS = 1800
+MAX_LINES = 5000
+
+
+def env(name: str, *, required: bool = True, default: str = "") -> str:
+    value = os.environ.get(name, "").strip() or default
+    if required and not value:
+        raise RuntimeError(f"{name} is required")
+    return value
+
+
+def request_json(
+    url: str,
+    *,
+    method: str = "GET",
+    headers: dict[str, str] | None = None,
+    body: dict[str, Any] | None = None,
+    timeout: int = 30,
+) -> dict[str, Any]:
+    data = None
+    request_headers = {"Accept": "application/json", **(headers or {})}
+    if body is not None:
+        data = json.dumps(body, separators=(",", ":")).encode()
+        request_headers["Content-Type"] = "application/json"
+    request = urllib.request.Request(url, data=data, headers=request_headers, method=method)
+    with urllib.request.urlopen(request, timeout=timeout) as response:
+        return json.load(response)
+
+
+def parse_log_line(raw: str) -> dict[str, Any] | None:
+    try:
+        record = json.loads(raw)
+    except (TypeError, json.JSONDecodeError):
+        return None
+    if not isinstance(record, dict):
+        return None
+
+    nested = record.get("log")
+    if isinstance(nested, str):
+        try:
+            parsed_nested = json.loads(nested.strip())
+        except json.JSONDecodeError:
+            parsed_nested = None
+        if isinstance(parsed_nested, dict):
+            record = parsed_nested
+    return record
+
+
+def safe_status(value: Any) -> int | None:
+    try:
+        status = int(value)
+    except (TypeError, ValueError):
+        return None
+    return status if 100 <= status <= 599 else None
+
+
+def is_incident(record: dict[str, Any]) -> bool:
+    status = safe_status(record.get("status"))
+    level = str(record.get("level", "")).lower()
+    event = str(record.get("event", "")).lower()
+    return bool(
+        (status is not None and status >= 500)
+        or level in {"error", "fatal", "panic"}
+        or event.endswith(".failed")
+        or event.endswith("_failed")
+    )
+
+
+def aggregate_incidents(records: list[dict[str, Any]]) -> dict[str, Any]:
+    incidents = [record for record in records if is_incident(record)]
+    statuses: Counter[str] = Counter()
+    routes: Counter[str] = Counter()
+    events: Counter[str] = Counter()
+    error_types: Counter[str] = Counter()
+
+    for record in incidents:
+        status = safe_status(record.get("status"))
+        if status is not None and status >= 500:
+            statuses[str(status)] += 1
+        route = str(record.get("route", "")).strip()
+        if route:
+            routes[route[:160]] += 1
+        event = str(record.get("event", "")).strip()
+        if event:
+            events[event[:160]] += 1
+        error_type = str(record.get("error_type", "")).strip()
+        if error_type:
+            error_types[error_type[:160]] += 1
+
+    return {
+        "count": len(incidents),
+        "statuses": statuses.most_common(10),
+        "routes": routes.most_common(10),
+        "events": events.most_common(10),
+        "error_types": error_types.most_common(10),
+    }
+
+
+def fingerprint(summary: dict[str, Any]) -> str:
+    canonical = json.dumps(summary, sort_keys=True, separators=(",", ":"))
+    return hashlib.sha256(canonical.encode()).hexdigest()[:16]
+
+
+def load_state(path: Path) -> dict[str, Any]:
+    try:
+        value = json.loads(path.read_text())
+    except (FileNotFoundError, json.JSONDecodeError, OSError):
+        return {}
+    return value if isinstance(value, dict) else {}
+
+
+def notification_kind(
+    summary: dict[str, Any], state: dict[str, Any], now: int, reminder_seconds: int
+) -> str:
+    active = bool(state.get("active"))
+    count = int(summary.get("count", 0))
+    if count > 0 and not active:
+        return "firing"
+    if count > 0 and active and now - int(state.get("last_alert_at", 0)) >= reminder_seconds:
+        return "reminder"
+    if count == 0 and active:
+        return "resolved"
+    return "none"
+
+
+def format_pairs(values: list[list[Any]] | list[tuple[Any, Any]]) -> str:
+    if not values:
+        return "none"
+    return ", ".join(f"{key} ({count})" for key, count in values[:5])
+
+
+def ai_summary(summary: dict[str, Any], ai_url: str) -> str:
+    prompt = (
+        "คุณเป็น production incident analyst สรุปข้อมูล aggregate ต่อไปนี้เป็นภาษาไทยไม่เกิน 500 ตัวอักษร "
+        "ระบุผลกระทบที่เป็นไปได้ จุดที่ควรตรวจ และห้ามเดาสาเหตุที่ไม่มีหลักฐาน "
+        "ข้อมูลไม่มี raw logs หรือข้อมูลผู้ใช้:\n"
+        + json.dumps(summary, ensure_ascii=False, separators=(",", ":"))
+    )
+    response = request_json(ai_url, method="POST", body={"prompt": prompt}, timeout=120)
+    text = response.get("data", {}).get("response", "") if isinstance(response.get("data"), dict) else ""
+    return str(text).strip()[:700]
+
+
+def discord_message(kind: str, summary: dict[str, Any], analysis: str, window_seconds: int) -> str:
+    if kind == "resolved":
+        return "✅ **Portfolio API incident resolved**\nไม่พบ HTTP 5xx หรือ error events ในช่วงตรวจล่าสุด"
+
+    heading = "🚨 **Portfolio API production alert**" if kind == "firing" else "⚠️ **Portfolio API incident reminder**"
+    lines = [
+        heading,
+        f"Window: last {window_seconds // 60} minutes | Incidents: **{summary['count']}**",
+        f"Statuses: {format_pairs(summary['statuses'])}",
+        f"Routes: {format_pairs(summary['routes'])}",
+        f"Events: {format_pairs(summary['events'])}",
+        f"Error types: {format_pairs(summary['error_types'])}",
+    ]
+    if analysis:
+        lines.extend(["", "**AI summary (sanitized aggregate only)**", analysis])
+    lines.extend(["", "Grafana query: `{application=\"portfolio-api\",environment=\"production\"} | json`"])
+    return "\n".join(lines)[:1950]
+
+
+def query_loki(push_url: str, username: str, token: str, start_ns: int, end_ns: int) -> list[dict[str, Any]]:
+    query_url = push_url.removesuffix("/loki/api/v1/push") + "/loki/api/v1/query_range"
+    params = urllib.parse.urlencode(
+        {
+            "query": STREAM_SELECTOR,
+            "start": str(start_ns),
+            "end": str(end_ns),
+            "limit": str(MAX_LINES),
+            "direction": "forward",
+        }
+    )
+    auth = base64.b64encode(f"{username}:{token}".encode()).decode()
+    response = request_json(f"{query_url}?{params}", headers={"Authorization": f"Basic {auth}"})
+    if response.get("status") != "success":
+        raise RuntimeError("Loki query did not return success")
+
+    records: list[dict[str, Any]] = []
+    for stream in response.get("data", {}).get("result", []):
+        for _, raw in stream.get("values", []):
+            record = parse_log_line(raw)
+            if record is not None:
+                records.append(record)
+    return records
+
+
+def send_discord(webhook_url: str, content: str) -> None:
+    request_json(
+        webhook_url + ("&" if "?" in webhook_url else "?") + "wait=true",
+        method="POST",
+        body={"content": content, "allowed_mentions": {"parse": []}},
+    )
+
+
+def main() -> int:
+    push_url = env("GRAFANA_LOKI_URL")
+    username = env("GRAFANA_LOKI_USERNAME")
+    token = env("GRAFANA_LOKI_TOKEN")
+    webhook_url = env("DISCORD_WEBHOOK_URL")
+    ai_url = env("AI_LOG_SUMMARY_URL", required=False, default="https://api.panyakorn.com/api/ai/generate")
+    state_path = Path(env("MONITOR_STATE_FILE", required=False, default=".monitor-state/state.json"))
+    dry_run = env("MONITOR_DRY_RUN", required=False, default="false").lower() == "true"
+    reminder_seconds = int(env("MONITOR_REMINDER_SECONDS", required=False, default=str(DEFAULT_REMINDER_SECONDS)))
+
+    if not push_url.startswith("https://") or not push_url.endswith("/loki/api/v1/push"):
+        raise RuntimeError("GRAFANA_LOKI_URL must be an HTTPS Loki push endpoint")
+    if not webhook_url.startswith("https://discord.com/api/webhooks/"):
+        raise RuntimeError("DISCORD_WEBHOOK_URL must be a Discord webhook URL")
+
+    now = int(time.time())
+    state = load_state(state_path)
+    previous_checked = int(state.get("last_checked_at", 0))
+    start_seconds = max(previous_checked - 30, now - 900) if previous_checked else now - DEFAULT_LOOKBACK_SECONDS
+    records = query_loki(push_url, username, token, start_seconds * 1_000_000_000, now * 1_000_000_000)
+    summary = aggregate_incidents(records)
+    kind = notification_kind(summary, state, now, reminder_seconds)
+    print(json.dumps({"kind": kind, "summary": summary}, ensure_ascii=False))
+
+    analysis = ""
+    if kind in {"firing", "reminder"}:
+        try:
+            analysis = ai_summary(summary, ai_url)
+        except (RuntimeError, urllib.error.URLError, TimeoutError, ValueError) as error:
+            print(f"AI summary unavailable: {type(error).__name__}", file=sys.stderr)
+            analysis = "AI summary ใช้งานไม่ได้ชั่วคราว กรุณาตรวจ Grafana ตาม aggregate ด้านบน"
+
+    if kind != "none":
+        message = discord_message(kind, summary, analysis, now - start_seconds)
+        if dry_run:
+            print(message)
+        else:
+            send_discord(webhook_url, message)
+
+    if not dry_run:
+        state_path.parent.mkdir(parents=True, exist_ok=True)
+        next_state = {
+            "active": summary["count"] > 0,
+            "last_checked_at": now,
+            "last_alert_at": now if kind in {"firing", "reminder"} else int(state.get("last_alert_at", 0)),
+            "last_fingerprint": fingerprint(summary) if summary["count"] > 0 else "",
+        }
+        state_path.write_text(json.dumps(next_state, sort_keys=True) + "\n")
+    return 0
+
+
+if __name__ == "__main__":
+    try:
+        raise SystemExit(main())
+    except (RuntimeError, urllib.error.URLError, TimeoutError, ValueError) as error:
+        print(f"Production log monitor failed: {error}", file=sys.stderr)
+        raise SystemExit(1)
