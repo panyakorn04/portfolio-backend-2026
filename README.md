@@ -222,16 +222,16 @@ openssl rand -base64 48  # STUDIO_WEBHOOK_SIGNING_KEY or visitor secret
 | Variable | Purpose |
 | --- | --- |
 | `AI_PROVIDER` | Provider mode; defaults to `stub` in `.env.example` |
-| `AI_API_KEY` | Reserved credential input for the contact-summary provider boundary; the current contact-summary implementation remains stub-only |
+| `AI_API_KEY` | Reserved credential override for the contact-summary provider boundary; the current contact-summary implementation remains stub-only |
 | `OLLAMA_BASE_URL` | Internal Ollama API URL |
 | `OLLAMA_MODEL` | Default Ollama model |
 | `OLLAMA_ALLOWED_MODELS` | Comma-separated public chat model allowlist; defaults to the pinned model when empty |
 | `AI_SKILLS_DIR` | Root directory for mounted AI skill profiles |
 | `PORTFOLIO_CHAT_VISITOR_SECRET` | Dedicated HMAC key used before visitor identifiers reach the database; mandatory in `pro` mode and never derived from another credential |
-| `PORTFOLIO_CHAT_SESSION_TTL_HOURS` | Intended anonymous-session lifetime; production default is 2160 hours |
-| `PORTFOLIO_CHAT_MAX_STORED_MESSAGES` | Intended per-session history cap; production default is 100 |
+| `PORTFOLIO_CHAT_SESSION_TTL_HOURS` | Anonymous-session lifetime override; defaults to 2160 hours and must be a positive integer |
+| `PORTFOLIO_CHAT_MAX_STORED_MESSAGES` | Per-session history cap override; defaults to 100 and must be a positive integer |
 
-The two portfolio-chat numeric defaults are currently set in `etc/portfolio-api.yaml`. If you change their environment values, keep the runtime config mapping synchronized.
+The typed defaults remain in `etc/portfolio-api.yaml`; `ApplyEnvironmentOverrides` applies optional runtime overrides after loading and fails closed on invalid numeric values.
 
 ## Docker development
 

@@ -29,6 +29,8 @@ container="$(docker run -d \
   --env ARTICLE_CACHE_TTL_SECONDS=300 \
   --env TRUST_PROXY=false \
   --env PORTFOLIO_CHAT_VISITOR_SECRET=smoke-test-dedicated-visitor-secret \
+  --env PORTFOLIO_CHAT_SESSION_TTL_HOURS=2160 \
+  --env PORTFOLIO_CHAT_MAX_STORED_MESSAGES=100 \
   --publish "127.0.0.1:${port}:8888" \
   "$image")"
 
