@@ -3,7 +3,7 @@ module portfolio-backend
 go 1.26.5
 
 require (
-	github.com/redis/go-redis/v9 v9.7.0
+	github.com/redis/go-redis/v9 v9.7.3
 	github.com/zeromicro/go-zero v1.7.3
 	golang.org/x/crypto v0.54.0
 	golang.org/x/image v0.44.0
