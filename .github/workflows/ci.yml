@@ -120,11 +120,14 @@ jobs:
       - name: Test release freshness gate
         run: bash .github/scripts/test_release_freshness.sh
       - name: Test deploy preflight image selection
-        run: bash .github/scripts/test_deploy_preflight.sh
+        run: |
+          bash .github/scripts/test_deploy_preflight.sh
+          bash deploy/test-deploy-compose-service.sh
       - name: Validate deployment scripts
         run: >-
           bash -n
           deploy/deploy-compose-service.sh
+          deploy/test-deploy-compose-service.sh
           deploy/install-grafana-alloy.sh
           .github/scripts/smoke-test-image.sh
           .github/scripts/deploy-preflight.sh
