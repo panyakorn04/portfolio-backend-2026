@@ -3,6 +3,7 @@ package handler
 import (
 	"bufio"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -208,48 +209,15 @@ func TestAiChatHandlerPinsAntiHallucinationGuardrailSkill(t *testing.T) {
 	}
 }
 
-func TestPortfolioAssistantChatHandlerInjectsPortfolioSkillProfile(t *testing.T) {
-	skillsDir := t.TempDir()
-	profileDir := filepath.Join(skillsDir, "portfolio-site", "portfolio-profile")
-	if err := os.MkdirAll(profileDir, 0o755); err != nil {
-		t.Fatalf("create skill profile: %v", err)
-	}
-	if err := os.WriteFile(filepath.Join(profileDir, "SKILL.md"), []byte("Portfolio-only skill: answer about Panyakorn services and never mention VPS internals."), 0o644); err != nil {
-		t.Fatalf("write skill: %v", err)
-	}
-
-	var got model.OllamaChatRequest
-	ollama := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if err := json.NewDecoder(r.Body).Decode(&got); err != nil {
-			t.Fatalf("decode ollama request: %v", err)
-		}
-		w.Header().Set("Content-Type", "application/json")
-		_, _ = w.Write([]byte(`{"model":"panyakorn-local:latest","message":{"role":"assistant","content":"Portfolio answer"},"done":true}`))
-	}))
-	defer ollama.Close()
-
-	svcCtx := &svc.ServiceContext{
-		Config:   config.Config{OllamaBaseURL: ollama.URL, OllamaModel: "panyakorn-local:latest", AISkillsDir: skillsDir},
-		Ollama:   model.NewOllamaClient(ollama.URL, "panyakorn-local:latest"),
-		AISkills: model.NewAISkillProfileStore(skillsDir),
-	}
-
+func TestPortfolioAssistantChatHandlerRequiresPersistedStream(t *testing.T) {
+	svcCtx := &svc.ServiceContext{Ollama: model.NewOllamaClient("http://127.0.0.1:1", "panyakorn-local:latest")}
 	req := httptest.NewRequest(http.MethodPost, "/api/portfolio/assistant/chat", strings.NewReader(`{"messages":[{"role":"user","content":"รับทำเว็บอะไรบ้าง"}]}`))
 	rec := httptest.NewRecorder()
 
 	PortfolioAssistantChatHandler(svcCtx).ServeHTTP(rec, req)
 
-	if rec.Code != http.StatusOK {
+	if rec.Code != http.StatusConflict {
 		t.Fatalf("status = %d, body = %s", rec.Code, rec.Body.String())
-	}
-	if len(got.Messages) != 2 {
-		t.Fatalf("messages len = %d, messages=%#v", len(got.Messages), got.Messages)
-	}
-	if got.Messages[0].Role != "system" || !strings.Contains(got.Messages[0].Content, `"portfolio-site"`) || !strings.Contains(got.Messages[0].Content, "Portfolio-only skill") {
-		t.Fatalf("missing portfolio skill context: %#v", got.Messages[0])
-	}
-	if got.Messages[1].Role != "user" || got.Messages[1].Content != "รับทำเว็บอะไรบ้าง" {
-		t.Fatalf("unexpected user message: %#v", got.Messages[1])
 	}
 }
 
@@ -330,6 +298,230 @@ func TestAiChatStreamHandlerForwardsOllamaStreamAsSSE(t *testing.T) {
 	}
 }
 
+func TestPortfolioAssistantChatStreamPersistsAtomicallyBeforeFinishing(t *testing.T) {
+	ollama := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"model":"panyakorn-local:latest","message":{"role":"assistant","content":"API OK"},"done":true}`))
+	}))
+	defer ollama.Close()
+
+	now := time.Now().UTC()
+	rpcCalled := false
+	supabase := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch {
+		case r.Method == http.MethodGet && r.URL.Path == "/rest/v1/PortfolioChatSession":
+			_, _ = fmt.Fprintf(w, `[{"id":"session-1","visitorIdHash":"hash","threadId":"thread-1","locale":"th","status":"active","createdAt":%q,"updatedAt":%q,"lastSeenAt":%q,"expiresAt":%q}]`, now.Format(time.RFC3339), now.Format(time.RFC3339), now.Format(time.RFC3339), now.Add(time.Hour).Format(time.RFC3339))
+		case r.Method == http.MethodGet && r.URL.Path == "/rest/v1/PortfolioChatMessage":
+			_, _ = w.Write([]byte(`[]`))
+		case r.Method == http.MethodPost && r.URL.Path == "/rest/v1/rpc/claimPortfolioChatRun":
+			_, _ = w.Write([]byte(`[{"outcome":"claimed"}]`))
+		case r.Method == http.MethodPost && r.URL.Path == "/rest/v1/rpc/completePortfolioChatRun":
+			var body map[string]any
+			if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+				t.Fatal(err)
+			}
+			if body["runId"] != "run-atomic" || body["assistantContent"] != "API OK" {
+				t.Fatalf("persistence body = %#v", body)
+			}
+			rpcCalled = true
+			_, _ = fmt.Fprintf(w, `[{"outcome":"inserted","userMessage":{"id":"user-1","sessionId":"session-1","role":"user","type":"chat","content":"hello","createdAt":%q},"assistantMessage":{"id":"assistant-1","sessionId":"session-1","role":"assistant","type":"chat","content":"API OK","createdAt":%q}}]`, now.Format(time.RFC3339), now.Format(time.RFC3339))
+		default:
+			t.Fatalf("unexpected persistence request %s %s", r.Method, r.URL.Path)
+		}
+	}))
+	defer supabase.Close()
+
+	svcCtx := newPortfolioChatSessionTestContext(supabase.URL)
+	svcCtx.Config.OllamaBaseURL = ollama.URL
+	svcCtx.Config.OllamaModel = "panyakorn-local:latest"
+	svcCtx.Ollama = model.NewOllamaClient(ollama.URL, "panyakorn-local:latest")
+	req := httptest.NewRequest(http.MethodPost, "/api/portfolio/assistant/chat/stream", strings.NewReader(`{"sessionId":"session-1","runId":"run-atomic","message":{"role":"user","content":"hello"}}`))
+	rec := httptest.NewRecorder()
+
+	PortfolioAssistantChatStreamHandler(svcCtx).ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK || !rpcCalled {
+		t.Fatalf("status = %d, rpcCalled = %v, body = %s", rec.Code, rpcCalled, rec.Body.String())
+	}
+	if strings.Contains(rec.Body.String(), `"type":"RUN_ERROR"`) || !strings.Contains(rec.Body.String(), `"type":"RUN_FINISHED"`) {
+		t.Fatalf("unexpected stream events: %s", rec.Body.String())
+	}
+}
+
+func TestPortfolioAssistantChatStreamDoesNotDeliverContentAfterConcurrentHandoff(t *testing.T) {
+	ollama := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"model":"panyakorn-local:latest","message":{"role":"assistant","content":"must stay hidden"},"done":true}`))
+	}))
+	defer ollama.Close()
+
+	now := time.Now().UTC()
+	supabase := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch r.URL.Path {
+		case "/rest/v1/PortfolioChatSession":
+			_, _ = fmt.Fprintf(w, `[{"id":"session-1","visitorIdHash":"hash","threadId":"thread-1","locale":"th","status":"active","createdAt":%q,"updatedAt":%q,"lastSeenAt":%q,"expiresAt":%q}]`, now.Format(time.RFC3339), now.Format(time.RFC3339), now.Format(time.RFC3339), now.Add(time.Hour).Format(time.RFC3339))
+		case "/rest/v1/rpc/claimPortfolioChatRun":
+			_, _ = w.Write([]byte(`[{"outcome":"claimed"}]`))
+		case "/rest/v1/PortfolioChatMessage":
+			_, _ = w.Write([]byte(`[]`))
+		case "/rest/v1/rpc/completePortfolioChatRun":
+			_, _ = w.Write([]byte(`[{"outcome":"state_conflict"}]`))
+		case "/rest/v1/rpc/releasePortfolioChatRun":
+			_, _ = w.Write([]byte(`true`))
+		default:
+			t.Fatalf("unexpected persistence request %s %s", r.Method, r.URL.Path)
+		}
+	}))
+	defer supabase.Close()
+
+	svcCtx := newPortfolioChatSessionTestContext(supabase.URL)
+	svcCtx.Config.OllamaBaseURL = ollama.URL
+	svcCtx.Config.OllamaModel = "panyakorn-local:latest"
+	svcCtx.Ollama = model.NewOllamaClient(ollama.URL, "panyakorn-local:latest")
+	req := httptest.NewRequest(http.MethodPost, "/api/portfolio/assistant/chat/stream", strings.NewReader(`{"sessionId":"session-1","runId":"run-race","message":{"role":"user","content":"hello"}}`))
+	rec := httptest.NewRecorder()
+
+	PortfolioAssistantChatStreamHandler(svcCtx).ServeHTTP(rec, req)
+
+	if strings.Contains(rec.Body.String(), "must stay hidden") || !strings.Contains(rec.Body.String(), "CHAT_STATE_CONFLICT") {
+		t.Fatalf("AI content escaped after handoff: %s", rec.Body.String())
+	}
+}
+
+func TestPortfolioAssistantChatStreamRejectsNonActiveSessions(t *testing.T) {
+	tests := []struct {
+		name   string
+		status string
+	}{
+		{name: "waiting for human", status: "pending_human"},
+		{name: "human takeover", status: "human"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			ollamaCalled := false
+			ollama := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {
+				ollamaCalled = true
+			}))
+			defer ollama.Close()
+
+			now := time.Now().UTC()
+			supabase := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if r.URL.Path != "/rest/v1/PortfolioChatSession" || r.Method != http.MethodGet {
+					t.Fatalf("unexpected persistence request %s %s", r.Method, r.URL.Path)
+				}
+				w.Header().Set("Content-Type", "application/json")
+				_, _ = fmt.Fprintf(w, `[{"id":"session-1","visitorIdHash":"hash","threadId":"thread-1","locale":"th","status":%q,"createdAt":%q,"updatedAt":%q,"lastSeenAt":%q,"expiresAt":%q}]`, tt.status, now.Format(time.RFC3339), now.Format(time.RFC3339), now.Format(time.RFC3339), now.Add(time.Hour).Format(time.RFC3339))
+			}))
+			defer supabase.Close()
+
+			svcCtx := newPortfolioChatSessionTestContext(supabase.URL)
+			svcCtx.Config.OllamaBaseURL = ollama.URL
+			svcCtx.Config.OllamaModel = "panyakorn-local:latest"
+			svcCtx.Ollama = model.NewOllamaClient(ollama.URL, "panyakorn-local:latest")
+
+			req := httptest.NewRequest(http.MethodPost, "/api/portfolio/assistant/chat/stream", strings.NewReader(`{"sessionId":"session-1","message":{"role":"user","content":"hello"}}`))
+			req.AddCookie(&http.Cookie{Name: portfolioVisitorCookieName, Value: "visitor-1"})
+			rec := httptest.NewRecorder()
+
+			PortfolioAssistantChatStreamHandler(svcCtx).ServeHTTP(rec, req)
+
+			if rec.Code != http.StatusConflict {
+				t.Fatalf("status = %d, body = %s", rec.Code, rec.Body.String())
+			}
+			if ollamaCalled {
+				t.Fatal("Ollama must not be called after human handoff")
+			}
+		})
+	}
+}
+
+func TestPortfolioAssistantChatStreamRejectsLegacyMessagesShape(t *testing.T) {
+	svcCtx := &svc.ServiceContext{Ollama: model.NewOllamaClient("http://127.0.0.1:1", "panyakorn-local:latest")}
+	req := httptest.NewRequest(http.MethodPost, "/api/portfolio/assistant/chat/stream", strings.NewReader(`{"sessionId":"session-1","runId":"run-1","messages":[{"role":"user","content":"hello"}]}`))
+	rec := httptest.NewRecorder()
+
+	PortfolioAssistantChatStreamHandler(svcCtx).ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, body = %s", rec.Code, rec.Body.String())
+	}
+}
+
+func TestPortfolioAssistantChatStreamReplaysStoredExchangeWithoutOllama(t *testing.T) {
+	ollamaCalled := false
+	ollama := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) { ollamaCalled = true }))
+	defer ollama.Close()
+
+	now := time.Now().UTC()
+	supabase := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch r.URL.Path {
+		case "/rest/v1/PortfolioChatSession":
+			_, _ = fmt.Fprintf(w, `[{"id":"session-1","visitorIdHash":"hash","threadId":"thread-1","locale":"th","status":"active","createdAt":%q,"updatedAt":%q,"lastSeenAt":%q,"expiresAt":%q}]`, now.Format(time.RFC3339), now.Format(time.RFC3339), now.Format(time.RFC3339), now.Add(time.Hour).Format(time.RFC3339))
+		case "/rest/v1/rpc/claimPortfolioChatRun":
+			_, _ = w.Write([]byte(`[{"outcome":"replayed","assistantContent":"stored answer","modelName":"panyakorn-local:latest"}]`))
+		case "/rest/v1/PortfolioChatMessage":
+			_, _ = w.Write([]byte(`[]`))
+		default:
+			t.Fatalf("unexpected persistence request %s %s", r.Method, r.URL.Path)
+		}
+	}))
+	defer supabase.Close()
+
+	svcCtx := newPortfolioChatSessionTestContext(supabase.URL)
+	svcCtx.Config.OllamaBaseURL = ollama.URL
+	svcCtx.Config.OllamaModel = "panyakorn-local:latest"
+	svcCtx.Ollama = model.NewOllamaClient(ollama.URL, "panyakorn-local:latest")
+	req := httptest.NewRequest(http.MethodPost, "/api/portfolio/assistant/chat/stream", strings.NewReader(`{"sessionId":"session-1","runId":"run-replay","message":{"role":"user","content":"hello"}}`))
+	rec := httptest.NewRecorder()
+
+	PortfolioAssistantChatStreamHandler(svcCtx).ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), "stored answer") || !strings.Contains(rec.Body.String(), `"type":"RUN_FINISHED"`) {
+		t.Fatalf("status = %d, body = %s", rec.Code, rec.Body.String())
+	}
+	if ollamaCalled {
+		t.Fatal("Ollama must not be called when replaying a persisted runId")
+	}
+}
+
+func TestPortfolioAssistantChatStreamRejectsConcurrentRunBeforeOllama(t *testing.T) {
+	ollamaCalled := false
+	ollama := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) { ollamaCalled = true }))
+	defer ollama.Close()
+
+	now := time.Now().UTC()
+	supabase := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch r.URL.Path {
+		case "/rest/v1/PortfolioChatSession":
+			_, _ = fmt.Fprintf(w, `[{"id":"session-1","visitorIdHash":"hash","threadId":"thread-1","locale":"th","status":"active","createdAt":%q,"updatedAt":%q,"lastSeenAt":%q,"expiresAt":%q}]`, now.Format(time.RFC3339), now.Format(time.RFC3339), now.Format(time.RFC3339), now.Add(time.Hour).Format(time.RFC3339))
+		case "/rest/v1/rpc/claimPortfolioChatRun":
+			_, _ = w.Write([]byte(`[{"outcome":"in_progress"}]`))
+		default:
+			t.Fatalf("unexpected persistence request %s %s", r.Method, r.URL.Path)
+		}
+	}))
+	defer supabase.Close()
+
+	svcCtx := newPortfolioChatSessionTestContext(supabase.URL)
+	svcCtx.Ollama = model.NewOllamaClient(ollama.URL, "panyakorn-local:latest")
+	req := httptest.NewRequest(http.MethodPost, "/api/portfolio/assistant/chat/stream", strings.NewReader(`{"sessionId":"session-1","runId":"run-concurrent","message":{"role":"user","content":"hello"}}`))
+	rec := httptest.NewRecorder()
+
+	PortfolioAssistantChatStreamHandler(svcCtx).ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusConflict || rec.Header().Get("Retry-After") != "3" {
+		t.Fatalf("status = %d, retry-after = %q, body = %s", rec.Code, rec.Header().Get("Retry-After"), rec.Body.String())
+	}
+	if ollamaCalled {
+		t.Fatal("Ollama must not be called for an already claimed run")
+	}
+}
+
 func TestAiChatHandlerRejectsInvalidMessages(t *testing.T) {
 	svcCtx := &svc.ServiceContext{Ollama: model.NewOllamaClient("http://127.0.0.1:1", "panyakorn-local:latest")}
 	req := httptest.NewRequest(http.MethodPost, "/api/ai/chat", strings.NewReader(`{"messages":[{"role":"tool","content":"no"}]}`))
@@ -339,24 +531,6 @@ func TestAiChatHandlerRejectsInvalidMessages(t *testing.T) {
 
 	if rec.Code != http.StatusBadRequest {
 		t.Fatalf("status = %d, body = %s", rec.Code, rec.Body.String())
-	}
-}
-
-func TestAIChatRateLimiterAllowsWithinWindow(t *testing.T) {
-	limiter := newAIChatRateLimiter(2, time.Minute)
-	now := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
-
-	if !limiter.allow("client", now) {
-		t.Fatal("first request should be allowed")
-	}
-	if !limiter.allow("client", now.Add(time.Second)) {
-		t.Fatal("second request should be allowed")
-	}
-	if limiter.allow("client", now.Add(2*time.Second)) {
-		t.Fatal("third request in the same window should be rejected")
-	}
-	if !limiter.allow("client", now.Add(2*time.Minute)) {
-		t.Fatal("request after the window should be allowed")
 	}
 }
 

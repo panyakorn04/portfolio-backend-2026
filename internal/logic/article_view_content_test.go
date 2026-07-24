@@ -27,6 +27,7 @@ func TestToDetailIncludesMDXContent(t *testing.T) {
 	detail := ToDetail(article, "en")
 	if detail == nil {
 		t.Fatal("ToDetail() = nil, want article detail")
+		return
 	}
 	if detail.Content != article.Translations[0].Content {
 		t.Fatalf("Content = %q, want %q", detail.Content, article.Translations[0].Content)

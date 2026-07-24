@@ -16,17 +16,8 @@ on:
         description: Full 40-character image commit SHA (required for rollback)
         type: string
         required: false
-      migration_verified:
-        description: Production migrations in this release were manually applied and verified
-        type: boolean
-        default: false
-
 permissions:
   contents: read
-
-concurrency:
-  group: ${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 env:
   IMAGE_REPOSITORY: ${{ vars.BACKEND_IMAGE_REPOSITORY }}
@@ -77,6 +68,12 @@ jobs:
       DATABASE_URL: postgresql://postgres:postgres@127.0.0.1:5432/portfolio_migrations?sslmode=disable
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          fetch-depth: 0
+      - name: Scan committed content for secrets
+        uses: gitleaks/gitleaks-action@ff98106e4c7b2bc287b24eaf42907196329070c7 # v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       - uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6.5.0
         with:
           go-version-file: go.mod
@@ -87,16 +84,43 @@ jobs:
           test -z "$(gofmt -l .)" || { gofmt -l .; exit 1; }
       - name: Vet
         run: go vet ./...
+      - name: Verify module files are tidy
+        run: go mod tidy -diff
+      - name: Scan reachable Go vulnerabilities
+        run: go tool govulncheck ./...
       - name: Test with race detector
         run: go test ./... -race -count=1 -shuffle=on
+      - name: Enforce critical handler coverage
+        run: python3 .github/scripts/check_handler_coverage.py
       - name: Test production log monitor
         run: python3 .github/scripts/test_monitor_production_logs.py
       - name: Test backend-only Supabase table contract
         run: python3 .github/scripts/test_migration_security.py
+      - name: Verify immutable migration manifest
+        env:
+          BASE_REF: ${{ github.base_ref }}
+        run: |
+          set -euo pipefail
+          if [ -n "$BASE_REF" ]; then
+            git fetch --no-tags origin "$BASE_REF"
+            python3 .github/scripts/migration-ledger.py verify --base-ref "origin/$BASE_REF"
+          else
+            python3 .github/scripts/migration-ledger.py verify
+          fi
+      - name: Test migration ledger tooling
+        run: |
+          python3 .github/scripts/test_migration_ledger.py
+          python3 .github/scripts/test_verify_production_migrations.py
       - name: Smoke test all migrations on PostgreSQL
         run: bash .github/scripts/smoke-test-migrations.sh
+      - name: Smoke test hardened Alloy Docker discovery
+        run: bash .github/scripts/smoke-test-alloy.sh
       - name: Test deploy change classifier
         run: bash .github/scripts/classify-deploy-change.sh --self-test
+      - name: Test release freshness gate
+        run: bash .github/scripts/test_release_freshness.sh
+      - name: Test deploy preflight image selection
+        run: bash .github/scripts/test_deploy_preflight.sh
       - name: Validate deployment scripts
         run: >-
           bash -n
@@ -104,12 +128,27 @@ jobs:
           deploy/install-grafana-alloy.sh
           .github/scripts/smoke-test-image.sh
           .github/scripts/deploy-preflight.sh
+          .github/scripts/test_deploy_preflight.sh
           .github/scripts/reconcile-rollout.sh
           .github/scripts/notify-deploy.sh
           .github/scripts/classify-deploy-change.sh
+          .github/scripts/check-release-freshness.sh
+          .github/scripts/test_release_freshness.sh
           .github/scripts/smoke-test-migrations.sh
-      - name: Validate production log monitor workflow
-        run: python3 -m py_compile .github/scripts/monitor-production-logs.py
+          .github/scripts/smoke-test-alloy.sh
+      - name: Validate Python tooling
+        run: >-
+          python3 -m py_compile
+          .github/scripts/check_handler_coverage.py
+          .github/scripts/migration-ledger.py
+          .github/scripts/monitor-production-logs.py
+          .github/scripts/test_migration_ledger.py
+          .github/scripts/test_verify_production_migrations.py
+          deploy/verify-production-migrations.py
+      - name: Lint GitHub Actions workflows
+        env:
+          GOWORK: "off"
+        run: go run github.com/rhysd/actionlint/cmd/actionlint@v1.7.7 .github/workflows/*.yml
 
   lint:
     runs-on: ubuntu-latest
@@ -209,7 +248,6 @@ jobs:
           RELEASE_SHA: ${{ github.sha }}
           REQUESTED_IMAGE_SHA: ${{ inputs.image_sha }}
           BEFORE_SHA: ${{ github.event.before }}
-          MIGRATION_VERIFIED: ${{ inputs.migration_verified }}
           DEPLOY_HEALTH_URL: ${{ vars.BACKEND_HEALTH_URL }}
           DEPLOY_COMPOSE_FILES: ${{ vars.BACKEND_COMPOSE_FILES }}
           DEPLOY_SERVICE: ${{ vars.BACKEND_COMPOSE_SERVICE }}
@@ -222,6 +260,9 @@ jobs:
     needs: [deploy-preflight]
     runs-on: ubuntu-latest
     timeout-minutes: 30
+    concurrency:
+      group: production-backend-deploy
+      cancel-in-progress: false
     environment:
       name: production
       url: ${{ vars.BACKEND_HEALTH_URL }}
@@ -230,12 +271,17 @@ jobs:
       packages: read
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
-      - name: Notify deployment start
+        with:
+          fetch-depth: 0
+      - name: Refuse a superseded approved release
         env:
-          DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
-          DEPLOY_IMAGE: ${{ needs.deploy-preflight.outputs.release_image }}
-          PREVIOUS_IMAGE: ${{ needs.deploy-preflight.outputs.previous_image }}
-        run: bash .github/scripts/notify-deploy.sh start
+          ACTION: ${{ github.event_name == 'workflow_dispatch' && inputs.action || 'deploy' }}
+          RELEASE_SHA: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+          git fetch --no-tags origin main
+          CURRENT_MAIN_SHA="$(git rev-parse origin/main)" \
+            bash .github/scripts/check-release-freshness.sh
       - name: Prepare pinned SSH host identity
         env:
           VPS_HOST: ${{ secrets.VPS_HOST }}
@@ -252,6 +298,57 @@ jobs:
           chmod 600 ~/.ssh/known_hosts
           test -n "$VPS_HOST"
           ssh-keygen -F "$VPS_HOST" -f ~/.ssh/known_hosts >/dev/null
+      - name: Verify live production migration ledger
+        env:
+          VPS_HOST: ${{ secrets.VPS_HOST }}
+          VPS_USER: ${{ secrets.VPS_USER }}
+          DEPLOY_ENV_FILE: ${{ vars.BACKEND_ENV_FILE }}
+          ACTION: ${{ github.event_name == 'workflow_dispatch' && inputs.action || 'deploy' }}
+          REQUESTED_IMAGE_SHA: ${{ inputs.image_sha }}
+        run: |
+          set -euo pipefail
+          release_sha="$GITHUB_SHA"
+          manifest_sha="$GITHUB_SHA"
+          if [ "$ACTION" = rollback ]; then
+            release_sha="$REQUESTED_IMAGE_SHA"
+            # Pre-ledger rollback commits have no manifest. Verify the live database
+            # against the current reviewed ledger while deploying the older image.
+            manifest_sha="$GITHUB_SHA"
+            verify_mode=rollback
+          else
+            verify_mode=forward
+          fi
+          [[ "$release_sha" =~ ^[0-9a-f]{40}$ ]]
+          [[ "$manifest_sha" =~ ^[0-9a-f]{40}$ ]]
+          env_file="${DEPLOY_ENV_FILE:-/opt/apps/.env}"
+          bundle_dir="$(mktemp -d)"
+          trap 'rm -rf "$bundle_dir"' EXIT
+          cp deploy/verify-production-migrations.py "$bundle_dir/verify.py"
+          git show "$manifest_sha:migrations/manifest.sha256" > "$bundle_dir/manifest.sha256"
+          # shellcheck disable=SC2016 # Variables expand on the remote host, not in this runner shell.
+          remote_script='tmp=$(mktemp -d); trap '\''rm -rf "$tmp"'\'' EXIT; tar -xzf - -C "$tmp"; python3 "$tmp/verify.py" --manifest "$tmp/manifest.sha256" --env-file "$DEPLOY_ENV_FILE" --mode "$VERIFY_MODE"'
+          printf -v remote_command 'DEPLOY_ENV_FILE=%q VERIFY_MODE=%q bash -c %q' "$env_file" "$verify_mode" "$remote_script"
+          tar -C "$bundle_dir" -czf - verify.py manifest.sha256 | \
+            ssh -i ~/.ssh/deploy_key \
+              -o BatchMode=yes \
+              -o StrictHostKeyChecking=yes \
+              -o ConnectTimeout=30 \
+              "${VPS_USER}@${VPS_HOST}" "$remote_command"
+      - name: Recheck release freshness before production mutation
+        env:
+          ACTION: ${{ github.event_name == 'workflow_dispatch' && inputs.action || 'deploy' }}
+          RELEASE_SHA: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+          git fetch --no-tags origin main
+          CURRENT_MAIN_SHA="$(git rev-parse origin/main)" \
+            bash .github/scripts/check-release-freshness.sh
+      - name: Notify deployment start
+        env:
+          DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
+          DEPLOY_IMAGE: ${{ needs.deploy-preflight.outputs.release_image }}
+          PREVIOUS_IMAGE: ${{ needs.deploy-preflight.outputs.previous_image }}
+        run: bash .github/scripts/notify-deploy.sh start
       - name: Deploy exact image and run sustained health gate
         id: rollout
         env:
@@ -260,6 +357,7 @@ jobs:
           GHCR_USERNAME: ${{ github.actor }}
           GHCR_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           DEPLOY_IMAGE: ${{ needs.deploy-preflight.outputs.release_image }}
+          ROLLBACK_IMAGE: ${{ needs.deploy-preflight.outputs.previous_image }}
           DEPLOY_HEALTH_URL: ${{ vars.BACKEND_HEALTH_URL }}
           DEPLOY_COMPOSE_FILES: ${{ vars.BACKEND_COMPOSE_FILES }}
           DEPLOY_SERVICE: ${{ vars.BACKEND_COMPOSE_SERVICE }}
@@ -270,8 +368,8 @@ jobs:
           deploy_log="$RUNNER_TEMP/deploy-output.log"
           : > "$deploy_log"
           echo "log_file=$deploy_log" >> "$GITHUB_OUTPUT"
-          remote_env=$(printf 'DEPLOY_IMAGE=%q IMAGE_VARIABLE=%q SERVICE=%q HEALTH_URL=%q COMPOSE_FILES=%q GHCR_USERNAME=%q ROLLOUT_ID=%q' \
-            "$DEPLOY_IMAGE" "$DEPLOY_IMAGE_VARIABLE" "$DEPLOY_SERVICE" "$DEPLOY_HEALTH_URL" "$DEPLOY_COMPOSE_FILES" "$GHCR_USERNAME" "$ROLLOUT_ID")
+          remote_env=$(printf 'DEPLOY_IMAGE=%q ROLLBACK_IMAGE=%q IMAGE_VARIABLE=%q SERVICE=%q HEALTH_URL=%q COMPOSE_FILES=%q GHCR_USERNAME=%q ROLLOUT_ID=%q' \
+            "$DEPLOY_IMAGE" "$ROLLBACK_IMAGE" "$DEPLOY_IMAGE_VARIABLE" "$DEPLOY_SERVICE" "$DEPLOY_HEALTH_URL" "$DEPLOY_COMPOSE_FILES" "$GHCR_USERNAME" "$ROLLOUT_ID")
           for attempt in 1 2 3; do
             set +e
             { printf '%s\n' "$GHCR_TOKEN"; cat deploy/deploy-compose-service.sh; } | \

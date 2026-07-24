@@ -43,6 +43,7 @@ type portfolioChatMessageRow struct {
 	Content   string         `json:"content"`
 	CreatedAt string         `json:"createdAt"`
 	Metadata  map[string]any `json:"metadata"`
+	RunID     *string        `json:"runId"`
 }
 
 func rowToPortfolioChatSession(row portfolioChatSessionRow) PortfolioChatSession {
@@ -77,6 +78,7 @@ func rowToPortfolioChatMessage(row portfolioChatMessageRow) PortfolioChatMessage
 		Content:   row.Content,
 		CreatedAt: timeFromString(row.CreatedAt),
 		Metadata:  row.Metadata,
+		RunID:     row.RunID,
 	}
 }
 
@@ -162,13 +164,13 @@ func (m *PortfolioChatSessionModel) DeleteByIDForVisitorHash(ctx context.Context
 
 func (m *PortfolioChatMessageModel) ListForSession(ctx context.Context, sessionID string, limit int) ([]PortfolioChatMessage, error) {
 	values := url.Values{}
-	values.Set("select", "id,sessionId,role,type,content,createdAt,metadata")
+	values.Set("select", "id,sessionId,role,type,content,createdAt,metadata,runId")
 	values.Set("sessionId", "eq."+sessionID)
 	if limit > 0 {
-		values.Set("order", "createdAt.desc")
+		values.Set("order", "createdAt.desc,id.desc")
 		values.Set("limit", strconv.Itoa(limit))
 	} else {
-		values.Set("order", "createdAt.asc")
+		values.Set("order", "createdAt.asc,id.asc")
 	}
 	var rows []portfolioChatMessageRow
 	if _, err := m.api.request(ctx, http.MethodGet, "PortfolioChatMessage", values, nil, "", &rows); err != nil {
@@ -254,7 +256,7 @@ func (m *PortfolioChatMessageModel) Append(ctx context.Context, sessionID, role,
 		"metadata":  metadata,
 	}
 	values := url.Values{}
-	values.Set("select", "id,sessionId,role,type,content,createdAt,metadata")
+	values.Set("select", "id,sessionId,role,type,content,createdAt,metadata,runId")
 	var rows []portfolioChatMessageRow
 	if _, err := m.api.request(ctx, http.MethodPost, "PortfolioChatMessage", values, body, "return=representation", &rows); err != nil {
 		return nil, err
@@ -264,4 +266,182 @@ func (m *PortfolioChatMessageModel) Append(ctx context.Context, sessionID, role,
 	}
 	message := rowToPortfolioChatMessage(rows[0])
 	return &message, nil
+}
+
+const (
+	PortfolioChatOutcomeInserted            = "inserted"
+	PortfolioChatOutcomeReplayed            = "replayed"
+	PortfolioChatOutcomeIdempotencyConflict = "idempotency_conflict"
+	PortfolioChatOutcomeStateConflict       = "state_conflict"
+	PortfolioChatOutcomeNotFound            = "not_found"
+	PortfolioChatOutcomeUpdated             = "updated"
+	PortfolioChatOutcomeHealed              = "healed"
+	PortfolioChatOutcomeReplied             = "replied"
+	PortfolioChatOutcomeClaimed             = "claimed"
+	PortfolioChatOutcomeInProgress          = "in_progress"
+)
+
+type PortfolioChatRunClaimInput struct {
+	SessionID     string
+	VisitorIDHash string
+	RunID         string
+	UserContent   string
+	LeaseOwner    string
+	LeaseUntil    time.Time
+	OccurredAt    time.Time
+}
+
+type PortfolioChatRunClaimResult struct {
+	Outcome          string `json:"outcome"`
+	AssistantContent string `json:"assistantContent"`
+	ModelName        string `json:"modelName"`
+}
+
+type PortfolioChatExchangeInput struct {
+	SessionID          string
+	VisitorIDHash      string
+	RunID              string
+	LeaseOwner         string
+	UserMessageID      string
+	AssistantMessageID string
+	UserContent        string
+	AssistantContent   string
+	ModelName          string
+	ExpiresAt          time.Time
+	MaxMessages        int
+	OccurredAt         time.Time
+}
+
+type PortfolioChatExchangeResult struct {
+	Outcome          string                `json:"outcome"`
+	UserMessage      *PortfolioChatMessage `json:"userMessage"`
+	AssistantMessage *PortfolioChatMessage `json:"assistantMessage"`
+}
+
+type PortfolioChatRequestHumanInput struct {
+	SessionID      string
+	VisitorIDHash  string
+	EventMessageID string
+	MaxMessages    int
+	OccurredAt     time.Time
+}
+
+type PortfolioChatTakeoverReplyInput struct {
+	SessionID         string
+	TakeoverMessageID string
+	ReplyMessageID    string
+	ReplyContent      string
+	AdminName         string
+	MaxMessages       int
+	OccurredAt        time.Time
+}
+
+type PortfolioChatMutationResult struct {
+	Outcome      string                `json:"outcome"`
+	Status       string                `json:"status"`
+	EventMessage *PortfolioChatMessage `json:"eventMessage,omitempty"`
+	ReplyMessage *PortfolioChatMessage `json:"replyMessage,omitempty"`
+}
+
+type PortfolioChatRetentionResult struct {
+	MessagesDeleted int64 `json:"messagesDeleted"`
+	SessionsDeleted int64 `json:"sessionsDeleted"`
+}
+
+func (m *PortfolioChatMessageModel) ClaimRun(ctx context.Context, input PortfolioChatRunClaimInput) (*PortfolioChatRunClaimResult, error) {
+	body := map[string]any{
+		"sessionId": input.SessionID, "visitorIdHash": input.VisitorIDHash, "runId": input.RunID,
+		"userContent": input.UserContent, "leaseOwner": input.LeaseOwner,
+		"leaseUntil": input.LeaseUntil.UTC(), "occurredAt": input.OccurredAt.UTC(),
+	}
+	var rows []PortfolioChatRunClaimResult
+	if _, err := m.api.request(ctx, http.MethodPost, "rpc/claimPortfolioChatRun", nil, body, "", &rows); err != nil {
+		return nil, err
+	}
+	if len(rows) == 0 {
+		return nil, ErrNotFound
+	}
+	return &rows[0], nil
+}
+
+func (m *PortfolioChatMessageModel) CompleteRun(ctx context.Context, input PortfolioChatExchangeInput) (*PortfolioChatExchangeResult, error) {
+	if input.UserMessageID == "" {
+		input.UserMessageID = newID()
+	}
+	if input.AssistantMessageID == "" {
+		input.AssistantMessageID = newID()
+	}
+	body := map[string]any{
+		"sessionId": input.SessionID, "visitorIdHash": input.VisitorIDHash, "runId": input.RunID,
+		"leaseOwner":    input.LeaseOwner,
+		"userMessageId": input.UserMessageID, "assistantMessageId": input.AssistantMessageID,
+		"userContent": input.UserContent, "assistantContent": input.AssistantContent, "modelName": input.ModelName,
+		"expiresAt": input.ExpiresAt.UTC(), "maxMessages": input.MaxMessages, "occurredAt": input.OccurredAt.UTC(),
+	}
+	var rows []PortfolioChatExchangeResult
+	if _, err := m.api.request(ctx, http.MethodPost, "rpc/completePortfolioChatRun", nil, body, "", &rows); err != nil {
+		return nil, err
+	}
+	if len(rows) == 0 {
+		return nil, ErrNotFound
+	}
+	return &rows[0], nil
+}
+
+func (m *PortfolioChatMessageModel) ReleaseRun(ctx context.Context, sessionID, visitorIDHash, runID, leaseOwner string) error {
+	body := map[string]any{
+		"sessionId": sessionID, "visitorIdHash": visitorIDHash, "runId": runID, "leaseOwner": leaseOwner,
+	}
+	var released bool
+	_, err := m.api.request(ctx, http.MethodPost, "rpc/releasePortfolioChatRun", nil, body, "", &released)
+	return err
+}
+
+func (m *PortfolioChatSessionModel) RequestHuman(ctx context.Context, input PortfolioChatRequestHumanInput) (*PortfolioChatMutationResult, error) {
+	if input.EventMessageID == "" {
+		input.EventMessageID = newID()
+	}
+	body := map[string]any{
+		"sessionId": input.SessionID, "visitorIdHash": input.VisitorIDHash, "eventMessageId": input.EventMessageID,
+		"maxMessages": input.MaxMessages, "occurredAt": input.OccurredAt.UTC(),
+	}
+	return m.callChatMutation(ctx, "rpc/requestPortfolioChatHuman", body)
+}
+
+func (m *PortfolioChatSessionModel) TakeoverAndReply(ctx context.Context, input PortfolioChatTakeoverReplyInput) (*PortfolioChatMutationResult, error) {
+	if input.TakeoverMessageID == "" {
+		input.TakeoverMessageID = newID()
+	}
+	if input.ReplyMessageID == "" {
+		input.ReplyMessageID = newID()
+	}
+	body := map[string]any{
+		"sessionId": input.SessionID, "takeoverMessageId": input.TakeoverMessageID, "replyMessageId": input.ReplyMessageID,
+		"replyContent": input.ReplyContent, "adminName": input.AdminName, "maxMessages": input.MaxMessages,
+		"occurredAt": input.OccurredAt.UTC(),
+	}
+	return m.callChatMutation(ctx, "rpc/takeoverAndReplyPortfolioChat", body)
+}
+
+func (m *PortfolioChatSessionModel) callChatMutation(ctx context.Context, path string, body map[string]any) (*PortfolioChatMutationResult, error) {
+	var rows []PortfolioChatMutationResult
+	if _, err := m.api.request(ctx, http.MethodPost, path, nil, body, "", &rows); err != nil {
+		return nil, err
+	}
+	if len(rows) == 0 {
+		return nil, ErrNotFound
+	}
+	return &rows[0], nil
+}
+
+func (m *PortfolioChatSessionModel) PruneRetention(ctx context.Context, maxMessages int, expiredBefore time.Time, batchSize int) (PortfolioChatRetentionResult, error) {
+	body := map[string]any{"maxMessages": maxMessages, "expiredBefore": expiredBefore.UTC(), "batchSize": batchSize}
+	var rows []PortfolioChatRetentionResult
+	if _, err := m.api.request(ctx, http.MethodPost, "rpc/prunePortfolioChatRetention", nil, body, "", &rows); err != nil {
+		return PortfolioChatRetentionResult{}, err
+	}
+	if len(rows) == 0 {
+		return PortfolioChatRetentionResult{}, ErrNotFound
+	}
+	return rows[0], nil
 }

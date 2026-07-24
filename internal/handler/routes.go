@@ -39,8 +39,8 @@ func SwaggerUIHandler(svcCtx *svc.ServiceContext) http.HandlerFunc {
 	}
 }
 
-func RegisterHandlers(server *rest.Server, svcCtx *svc.ServiceContext) []string {
-	routes := []rest.Route{
+func registeredRoutes(svcCtx *svc.ServiceContext) []rest.Route {
+	return []rest.Route{
 		// Public
 		{Method: http.MethodGet, Path: "/api/health", Handler: HealthHandler(svcCtx)},
 		{Method: http.MethodGet, Path: "/api/ready", Handler: StudioReadinessHandler(svcCtx)},
@@ -135,6 +135,10 @@ func RegisterHandlers(server *rest.Server, svcCtx *svc.ServiceContext) []string 
 		{Method: http.MethodGet, Path: "/swagger/doc.json", Handler: SwaggerDocHandler(svcCtx)},
 		{Method: http.MethodGet, Path: "/swagger", Handler: SwaggerUIHandler(svcCtx)},
 	}
+}
+
+func RegisterHandlers(server *rest.Server, svcCtx *svc.ServiceContext) []string {
+	routes := registeredRoutes(svcCtx)
 	server.AddRoutes(routes)
 
 	patterns := make([]string, 0, len(routes))

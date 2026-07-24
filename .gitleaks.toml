@@ -1,0 +1,8 @@
+title = "portfolio-backend gitleaks configuration"
+
+[extend]
+useDefault = true
+
+[[allowlists]]
+description = "Security guidance intentionally contains examples of patterns that must never be committed as real credentials."
+paths = ['''^\.agents/skills/golang-security/references/secrets\.md$''']
