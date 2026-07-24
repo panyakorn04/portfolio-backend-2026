@@ -11,10 +11,11 @@ printf 'BACKEND_IMAGE=ghcr.io/example/backend:old\n' > "$tmp/apps/.env"
 cat > "$tmp/bin/docker" <<'SH'
 #!/usr/bin/env bash
 set -euo pipefail
+printf '%s\n' "$*" >> "$MOCK_DOCKER_LOG"
 if [ "$1" = login ] || [ "$1" = pull ]; then exit 0; fi
 if [ "$1" = compose ]; then
   case " $* " in
-    *" ps -q backend "*) printf 'container-id\n' ;;
+    *" ps -q backend "*) [ "${MOCK_FIRST_DEPLOY:-0}" = 1 ] || printf 'container-id\n' ;;
     *" config --quiet "*|*" pull backend "*|*" up -d "*) exit 0 ;;
     *) exit 0 ;;
   esac
@@ -61,6 +62,7 @@ release="ghcr.io/example/backend@sha256:$(printf '%064d' 1)"
 output="$tmp/output.log"
 set +e
 PATH="$tmp/bin:$PATH" \
+MOCK_DOCKER_LOG="$tmp/docker.log" \
 APPS_DIR="$tmp/apps" ENV_FILE="$tmp/apps/.env" COMPOSE_FILES=docker-compose.yml \
 DEPLOY_IMAGE="$release" ROLLBACK_IMAGE="$stale" IMAGE_VARIABLE=BACKEND_IMAGE SERVICE=backend \
 HEALTH_URL=https://example.com/health GHCR_USERNAME=test GHCR_TOKEN=test ROLLOUT_ID=test \
@@ -82,4 +84,22 @@ for expected in "ROLLBACK_IMAGE_RESOLVED=$actual" "SUSTAINED_MONITORING=passed";
   fi
 done
 grep -Fqx "BACKEND_IMAGE=$release" "$tmp/apps/.env"
+
+# A failed first deployment must remove only the newly created service container
+# after restoring the previous environment file.
+printf 'BACKEND_IMAGE=ghcr.io/example/backend:old\n' > "$tmp/apps/.env"
+: > "$tmp/docker.log"
+set +e
+PATH="$tmp/bin:$PATH" MOCK_DOCKER_LOG="$tmp/docker.log" MOCK_FIRST_DEPLOY=1 \
+APPS_DIR="$tmp/apps" ENV_FILE="$tmp/apps/.env" COMPOSE_FILES=docker-compose.yml \
+DEPLOY_IMAGE="$release" ROLLBACK_IMAGE='' IMAGE_VARIABLE=BACKEND_IMAGE SERVICE=backend \
+HEALTH_URL=https://example.com/health GHCR_USERNAME=test GHCR_TOKEN=test ROLLOUT_ID=first-deploy-test \
+IMMEDIATE_ATTEMPTS=1 IMMEDIATE_DELAY=0 SHORT_TERM_ATTEMPTS=1 SHORT_TERM_DELAY=0 \
+MEDIUM_TERM_ATTEMPTS=1 MEDIUM_TERM_DELAY=0 ROLLBACK_ATTEMPTS=1 ROLLBACK_DELAY=0 \
+bash "$repo_root/deploy/deploy-compose-service.sh" >"$tmp/first-deploy.log" 2>&1
+first_status=$?
+set -e
+[ "$first_status" -ne 0 ]
+grep -Fq 'compose -f docker-compose.yml rm --stop --force backend' "$tmp/docker.log"
+grep -Fqx 'BACKEND_IMAGE=ghcr.io/example/backend:old' "$tmp/apps/.env"
 printf 'live rollback digest resolution test passed\n'

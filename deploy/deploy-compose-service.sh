@@ -174,6 +174,7 @@ monitor_sustained() {
   done
 }
 
+production_mutated=false
 rollback() {
   local status=$?
   trap - ERR
@@ -196,9 +197,19 @@ rollback() {
     fi
   else
     cp "$env_backup" "$ENV_FILE"
-    set_rollout_status rollback_unavailable ""
-    echo "ROLLBACK_RESULT=unavailable"
-    echo "No previous image was discoverable; restored .env only" >&2
+    if [ "$production_mutated" = true ] && docker compose "${compose_args[@]}" rm --stop --force "$SERVICE"; then
+      set_rollout_status rollback_first_deploy_removed ""
+      echo "ROLLBACK_RESULT=first-deploy-removed"
+      echo "Failed first-deploy service container removed; previous .env restored" >&2
+    elif [ "$production_mutated" = true ]; then
+      set_rollout_status rollback_failure ""
+      echo "ROLLBACK_RESULT=failure"
+      echo "Failed first-deploy service container could not be removed" >&2
+    else
+      set_rollout_status rollback_unavailable ""
+      echo "ROLLBACK_RESULT=unavailable"
+      echo "No production mutation occurred; previous .env restored" >&2
+    fi
   fi
   exit "$status"
 }
@@ -208,6 +219,7 @@ set_rollout_status deploying "$DEPLOY_IMAGE"
 set_image "$DEPLOY_IMAGE"
 docker compose "${compose_args[@]}" config --quiet
 docker compose "${compose_args[@]}" pull "$SERVICE"
+production_mutated=true
 docker compose "${compose_args[@]}" up -d --no-deps --force-recreate "$SERVICE"
 verify_running_image "$DEPLOY_IMAGE"
 set_rollout_status image_verified "$DEPLOY_IMAGE"
