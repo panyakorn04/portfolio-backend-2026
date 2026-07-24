@@ -123,7 +123,7 @@ func TestParseStudioCurlCommandSanitizesCredentials(t *testing.T) {
 	if len(result.Warnings) == 0 {
 		t.Fatal("credential removal must emit a warning")
 	}
-	headerResult, err := parseStudioCurlCommand(`curl 'https://example.com' -H 'X-Client-Secret: hidden' -H 'X-Webhook-Secret: hidden' -H 'X-Custom-Token: sk-live-example'`)
+	headerResult, err := parseStudioCurlCommand(`curl 'https://example.com' -H 'X-Client-Secret: hidden' -H 'X-Webhook-Secret: hidden' -H 'X-Custom-Token: sk-live-example'`) // gitleaks:allow -- synthetic sanitizer fixture.
 	if err != nil || len(headerResult.Headers) != 0 || len(headerResult.Warnings) < 3 {
 		t.Fatalf("custom headers were not stripped fail-closed: result=%#v err=%v", headerResult, err)
 	}

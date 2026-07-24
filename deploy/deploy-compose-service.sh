@@ -2,6 +2,7 @@
 set -Eeuo pipefail
 
 : "${DEPLOY_IMAGE:?DEPLOY_IMAGE is required}"
+ROLLBACK_IMAGE="${ROLLBACK_IMAGE:-}"
 : "${IMAGE_VARIABLE:?IMAGE_VARIABLE is required}"
 : "${SERVICE:?SERVICE is required}"
 : "${HEALTH_URL:?HEALTH_URL is required}"
@@ -23,6 +24,11 @@ HEALTH_TIMEOUT="${HEALTH_TIMEOUT:-10}"
 HEALTH_LATENCY_LIMIT="${HEALTH_LATENCY_LIMIT:-5}"
 ROLLOUT_ID="${ROLLOUT_ID:-manual-$$}"
 [[ "$ROLLOUT_ID" =~ ^[A-Za-z0-9._-]+$ ]] || { echo "ROLLOUT_ID contains unsupported characters" >&2; exit 1; }
+image_digest_pattern='^[^[:space:]@]+@sha256:[0-9a-f]{64}$'
+[[ "$DEPLOY_IMAGE" =~ $image_digest_pattern ]] || { echo "DEPLOY_IMAGE must be an immutable repo@sha256 digest" >&2; exit 1; }
+if [ -n "$ROLLBACK_IMAGE" ]; then
+  [[ "$ROLLBACK_IMAGE" =~ $image_digest_pattern ]] || { echo "ROLLBACK_IMAGE must be an immutable repo@sha256 digest" >&2; exit 1; }
+fi
 
 cd "$APPS_DIR"
 [ -f "$ENV_FILE" ] || touch "$ENV_FILE"
@@ -56,14 +62,8 @@ trap cleanup EXIT
 printf '%s\n' "$GHCR_TOKEN" | docker login "$registry" --username "$GHCR_USERNAME" --password-stdin
 unset GHCR_TOKEN
 
-previous_image=""
+previous_image="$ROLLBACK_IMAGE"
 container_id="$(docker compose "${compose_args[@]}" ps -q "$SERVICE" 2>/dev/null || true)"
-if [ -n "$container_id" ]; then
-  previous_image="$(docker inspect --format='{{.Config.Image}}' "$container_id" 2>/dev/null || true)"
-fi
-if [ -z "$previous_image" ]; then
-  previous_image="$(awk -F= -v key="$IMAGE_VARIABLE" '$1 == key {sub(/^[^=]*=/, ""); print; exit}' "$ENV_FILE")"
-fi
 
 # Fail before touching production when the rollback artifact is unavailable.
 if [ -n "$previous_image" ]; then
@@ -71,6 +71,18 @@ if [ -n "$previous_image" ]; then
   if ! docker pull "$previous_image" >/dev/null; then
     set_rollout_status rollback_image_unavailable "$previous_image"
     echo "DEPLOY_ABORTED=rollback-image-unavailable" >&2
+    exit 1
+  fi
+  [ -n "$container_id" ] || {
+    set_rollout_status rollback_image_mismatch "$previous_image"
+    echo "DEPLOY_ABORTED=rollback-image-without-running-release" >&2
+    exit 1
+  }
+  running_image_id="$(docker inspect --format='{{.Image}}' "$container_id")"
+  rollback_image_id="$(docker image inspect --format='{{.Id}}' "$previous_image")"
+  if [ "$running_image_id" != "$rollback_image_id" ]; then
+    set_rollout_status rollback_image_mismatch "$previous_image"
+    echo "DEPLOY_ABORTED=rollback-image-does-not-match-running-release" >&2
     exit 1
   fi
   echo "ROLLBACK_WORTHINESS=verified"

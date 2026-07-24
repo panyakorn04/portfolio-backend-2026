@@ -28,6 +28,26 @@ func TestPortfolioAssistantNewSessionRejectsMissingTitle(t *testing.T) {
 	}
 }
 
+func TestPortfolioAssistantNewSessionRejectsOversizedTitle(t *testing.T) {
+	svcCtx := newPortfolioChatSessionTestContext("http://127.0.0.1:1")
+	body := `{"title":"` + strings.Repeat("x", maxPortfolioChatTitleLength+1) + `"}`
+	req := httptest.NewRequest(http.MethodPost, "/api/portfolio/assistant/sessions", strings.NewReader(body))
+	rec := httptest.NewRecorder()
+
+	PortfolioAssistantNewSessionHandler(svcCtx).ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusBadRequest || !strings.Contains(rec.Body.String(), "Title is too long") {
+		t.Fatalf("status = %d, body = %s", rec.Code, rec.Body.String())
+	}
+}
+
+func TestPortfolioChatMaxStoredMessagesRejectsValuesBelowDatabaseMinimum(t *testing.T) {
+	svcCtx := &svc.ServiceContext{Config: config.Config{PortfolioChatMaxStoredMessages: 1}}
+	if got := portfolioChatMaxStoredMessages(svcCtx); got != defaultPortfolioChatMaxMessages {
+		t.Fatalf("max stored messages = %d, want %d", got, defaultPortfolioChatMaxMessages)
+	}
+}
+
 func TestPortfolioAssistantNewSessionPersistsTitle(t *testing.T) {
 	var got map[string]any
 	supabase := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

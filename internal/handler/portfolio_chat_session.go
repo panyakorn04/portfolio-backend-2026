@@ -22,6 +22,9 @@ const (
 	portfolioVisitorCookieMaxAge    = 180 * 24 * 60 * 60
 	defaultPortfolioChatTTLHours    = 90 * 24
 	defaultPortfolioChatMaxMessages = 100
+	minPortfolioChatMaxMessages     = 2
+	maxPortfolioChatTitleLength     = 200
+	maxPortfolioChatSessionBody     = 16 * 1024
 )
 
 type portfolioChatSessionResponse struct {
@@ -90,6 +93,9 @@ func PortfolioAssistantLatestSessionHandler(svcCtx *svc.ServiceContext) http.Han
 
 func PortfolioAssistantNewSessionHandler(svcCtx *svc.ServiceContext) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
+		if !enforcePortfolioChatWriteRateLimit(w, r, svcCtx, "create") {
+			return
+		}
 		if !requirePortfolioChatDatabase(w, svcCtx) {
 			return
 		}
@@ -101,12 +107,16 @@ func PortfolioAssistantNewSessionHandler(svcCtx *svc.ServiceContext) http.Handle
 		}
 
 		var payload portfolioChatNewSessionRequest
-		if !decodeJSON(w, r, &payload) {
+		if !decodeJSONWithLimit(w, r, &payload, maxPortfolioChatSessionBody) {
 			return
 		}
 		title := strings.TrimSpace(payload.Title)
 		if title == "" {
 			response.Error(w, http.StatusBadRequest, "Title is required.")
+			return
+		}
+		if len([]rune(title)) > maxPortfolioChatTitleLength {
+			response.Error(w, http.StatusBadRequest, "Title is too long.")
 			return
 		}
 
@@ -122,6 +132,9 @@ func PortfolioAssistantNewSessionHandler(svcCtx *svc.ServiceContext) http.Handle
 
 func PortfolioAssistantRequestHumanHandler(svcCtx *svc.ServiceContext) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
+		if !enforcePortfolioChatWriteRateLimit(w, r, svcCtx, "handoff") {
+			return
+		}
 		if !requirePortfolioChatDatabase(w, svcCtx) {
 			return
 		}
@@ -138,28 +151,25 @@ func PortfolioAssistantRequestHumanHandler(svcCtx *svc.ServiceContext) http.Hand
 			return
 		}
 
-		session, err := svcCtx.PortfolioChatSessions.FindByIDForVisitorHash(r.Context(), sessionID, visitorHash, time.Now().UTC())
+		result, err := svcCtx.PortfolioChatSessions.RequestHuman(r.Context(), model.PortfolioChatRequestHumanInput{
+			SessionID: sessionID, VisitorIDHash: visitorHash,
+			MaxMessages: portfolioChatMaxStoredMessages(svcCtx), OccurredAt: time.Now().UTC(),
+		})
 		if err != nil {
-			observability.Error(r.Context(), "portfolio_chat.handoff.session_lookup_failed", "Portfolio chat handoff session lookup failed", err)
-			response.Error(w, http.StatusServiceUnavailable, "Unable to load chat session.")
-			return
-		}
-		if session == nil {
-			response.Error(w, http.StatusNotFound, "Chat session not found.")
-			return
-		}
-
-		if err := svcCtx.PortfolioChatSessions.UpdateStatus(r.Context(), sessionID, "pending_human"); err != nil {
-			observability.Error(r.Context(), "portfolio_chat.handoff.status_update_failed", "Portfolio chat handoff status update failed", err)
+			observability.Error(r.Context(), "portfolio_chat.handoff.atomic_failed", "Portfolio chat handoff transaction failed", err)
 			response.Error(w, http.StatusServiceUnavailable, "Unable to request human contact.")
 			return
 		}
-
-		if _, err := svcCtx.PortfolioChatMessages.Append(r.Context(), sessionID, "system", "request_human", "Visitor requested human contact", map[string]any{"source": "portfolio-widget"}); err != nil {
-			observability.Error(r.Context(), "portfolio_chat.handoff.message_append_failed", "Portfolio chat handoff message persistence failed", err)
+		switch result.Outcome {
+		case model.PortfolioChatOutcomeUpdated, model.PortfolioChatOutcomeReplayed, model.PortfolioChatOutcomeHealed:
+			response.Ok(w, http.StatusOK, map[string]any{"status": result.Status})
+		case model.PortfolioChatOutcomeNotFound:
+			response.Error(w, http.StatusNotFound, "Chat session not found.")
+		case model.PortfolioChatOutcomeStateConflict:
+			response.Error(w, http.StatusConflict, "A human has already joined this conversation.")
+		default:
+			response.Error(w, http.StatusServiceUnavailable, "Unable to request human contact.")
 		}
-
-		response.Ok(w, http.StatusOK, map[string]any{"status": "pending_human"})
 	}
 }
 
@@ -293,7 +303,7 @@ func portfolioChatExpiresAt(svcCtx *svc.ServiceContext) time.Time {
 
 func portfolioChatMaxStoredMessages(svcCtx *svc.ServiceContext) int {
 	maxMessages := svcCtx.Config.PortfolioChatMaxStoredMessages
-	if maxMessages <= 0 {
+	if maxMessages < minPortfolioChatMaxMessages {
 		maxMessages = defaultPortfolioChatMaxMessages
 	}
 	if maxMessages > 500 {

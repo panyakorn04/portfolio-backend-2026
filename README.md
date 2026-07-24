@@ -85,7 +85,7 @@ The service does not open a direct PostgreSQL connection. All runtime persistenc
 | AI runtime | Ollama HTTP API |
 | Authentication | bcrypt, legacy scrypt compatibility, SHA-256 session-token hashes, bearer tokens |
 | Credential encryption | AES-256-GCM with scope-bound AAD |
-| API documentation | `portfolio.api`, committed partial `swagger.json`, and hosted Swagger UI |
+| API documentation | Runtime-backed `portfolio.api` / `swagger.json` parity tests and hosted Swagger UI |
 | Container | Multi-stage Alpine image, static binary, non-root runtime user |
 | Delivery | GitHub Actions, GHCR immutable SHA images, Docker Compose, Caddy |
 
@@ -148,7 +148,22 @@ cd portfolio-backend-2026
 cp .env.example .env
 ```
 
-Set your Supabase URL and keys in `.env`. For a clean Supabase project, apply every file in `migrations/` through the Supabase SQL Editor in numeric order before creating users or starting features that depend on those tables.
+Set your Supabase URL and keys in `.env`. Migration files are immutable after merge and are checksummed in `migrations/manifest.sha256`. Generate one transaction for Supabase SQL Editor instead of copying individual files:
+
+```bash
+# Clean database: applies and registers every migration.
+python3 .github/scripts/migration-ledger.py bootstrap \
+  --baseline-through 0000 --through 0022 \
+  --output /tmp/portfolio-migrations.sql
+
+# Existing production currently attested through 0021: assert the exact
+# reviewed baseline, apply 0022, and register only the new checksum atomically.
+python3 .github/scripts/migration-ledger.py bootstrap \
+  --baseline-through 0021 --through 0022 \
+  --output /tmp/portfolio-migrations.sql
+```
+
+Review `/tmp/portfolio-migrations.sql`, apply the whole bundle once in Supabase SQL Editor, and retain the successful SQL Editor result as change-window evidence. CI compares the immutable manifest with the live `PortfolioMigration` ledger before any production rollout. It fails closed on missing, unexpected, or checksum-mismatched rows.
 
 The CLI intentionally creates only `editor` or `viewer` accounts:
 
@@ -423,7 +438,7 @@ GRAFANA_LOKI_USERNAME  # Grafana Cloud hosted-logs instance ID
 GRAFANA_LOKI_TOKEN     # access-policy token with logs:write and logs:read
 ```
 
-The workflow transfers credentials over pinned SSH stdin, stores the production Alloy environment file with mode `0600`, starts a digest-pinned Alloy v1.17.1 container, probes the local Alloy readiness endpoint, and requires the exact structured request-ID event from the production backend. Alloy reads only the `api`/`backend` Docker Compose services and assigns bounded `application="portfolio-api"` and `environment="production"` labels; request IDs remain inside log content and never become high-cardinality labels.
+The workflow transfers credentials over pinned SSH stdin, stores the production Alloy environment file with mode `0600`, starts digest-pinned Alloy v1.17.1 and Docker socket-proxy containers, probes the local Alloy readiness endpoint, and requires the exact structured request-ID event from the production backend. Alloy has no direct Docker socket mount: the internal-only proxy permits read-only container/event APIs and rejects mutating requests. Alloy reads only the `api`/`backend` Docker Compose services and assigns bounded `application="portfolio-api"` and `environment="production"` labels; request IDs remain inside log content and never become high-cardinality labels.
 
 Example Grafana Explore query:
 

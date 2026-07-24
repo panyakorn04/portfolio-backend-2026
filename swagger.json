@@ -15,6 +15,42 @@
   },
   "basePath": "/",
   "paths": {
+    "/api/admin/article-images": {
+      "post": {
+        "produces": [
+          "application/json"
+        ],
+        "schemes": [
+          "https"
+        ],
+        "summary": "uploadArticleImage",
+        "operationId": "adminUploadArticleImage",
+        "responses": {
+          "201": {
+            "description": "Image uploaded",
+            "schema": {}
+          },
+          "400": {
+            "description": "Invalid image",
+            "schema": {}
+          },
+          "401": {
+            "description": "Unauthorized",
+            "schema": {}
+          },
+          "403": {
+            "description": "Forbidden",
+            "schema": {}
+          }
+        },
+        "security": [
+          {
+            "AdminSessionCookie": []
+          }
+        ],
+        "parameters": []
+      }
+    },
     "/api/admin/articles": {
       "get": {
         "produces": [
@@ -30,7 +66,13 @@
             "description": "",
             "schema": {}
           }
-        }
+        },
+        "security": [
+          {
+            "AdminSessionCookie": []
+          }
+        ],
+        "parameters": []
       },
       "post": {
         "produces": [
@@ -46,7 +88,13 @@
             "description": "",
             "schema": {}
           }
-        }
+        },
+        "security": [
+          {
+            "AdminSessionCookie": []
+          }
+        ],
+        "parameters": []
       }
     },
     "/api/admin/articles/{id}": {
@@ -64,7 +112,20 @@
             "description": "",
             "schema": {}
           }
-        }
+        },
+        "security": [
+          {
+            "AdminSessionCookie": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "type": "string"
+          }
+        ]
       },
       "delete": {
         "produces": [
@@ -80,7 +141,20 @@
             "description": "",
             "schema": {}
           }
-        }
+        },
+        "security": [
+          {
+            "AdminSessionCookie": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "type": "string"
+          }
+        ]
       },
       "patch": {
         "produces": [
@@ -96,7 +170,212 @@
             "description": "",
             "schema": {}
           }
-        }
+        },
+        "security": [
+          {
+            "AdminSessionCookie": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "type": "string"
+          }
+        ]
+      }
+    },
+    "/api/admin/chat/sessions": {
+      "get": {
+        "produces": [
+          "application/json"
+        ],
+        "schemes": [
+          "https"
+        ],
+        "summary": "listChatSessions",
+        "operationId": "adminListChatSessions",
+        "responses": {
+          "200": {
+            "description": "Chat sessions",
+            "schema": {}
+          },
+          "401": {
+            "description": "Unauthorized",
+            "schema": {}
+          },
+          "403": {
+            "description": "Forbidden",
+            "schema": {}
+          }
+        },
+        "security": [
+          {
+            "AdminSessionCookie": []
+          }
+        ],
+        "parameters": []
+      }
+    },
+    "/api/admin/chat/sessions/{id}": {
+      "get": {
+        "produces": [
+          "application/json"
+        ],
+        "schemes": [
+          "https"
+        ],
+        "summary": "getChatSession",
+        "operationId": "adminGetChatSession",
+        "responses": {
+          "200": {
+            "description": "Chat session",
+            "schema": {}
+          },
+          "401": {
+            "description": "Unauthorized",
+            "schema": {}
+          },
+          "403": {
+            "description": "Forbidden",
+            "schema": {}
+          },
+          "404": {
+            "description": "Not found",
+            "schema": {}
+          }
+        },
+        "security": [
+          {
+            "AdminSessionCookie": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "type": "string"
+          }
+        ]
+      },
+      "patch": {
+        "produces": [
+          "application/json"
+        ],
+        "schemes": [
+          "https"
+        ],
+        "summary": "updateChatSession",
+        "operationId": "adminUpdateChatSession",
+        "responses": {
+          "200": {
+            "description": "Updated",
+            "schema": {}
+          },
+          "400": {
+            "description": "Invalid request",
+            "schema": {}
+          },
+          "401": {
+            "description": "Unauthorized",
+            "schema": {}
+          },
+          "403": {
+            "description": "Forbidden",
+            "schema": {}
+          },
+          "404": {
+            "description": "Not found",
+            "schema": {}
+          }
+        },
+        "security": [
+          {
+            "AdminSessionCookie": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "type": "string"
+          }
+        ]
+      }
+    },
+    "/api/admin/chat/sessions/{id}/reply": {
+      "post": {
+        "produces": [
+          "application/json"
+        ],
+        "schemes": [
+          "https"
+        ],
+        "summary": "replyChatSession",
+        "operationId": "adminReplyChatSession",
+        "responses": {
+          "201": {
+            "description": "Reply persisted",
+            "schema": {}
+          },
+          "400": {
+            "description": "Invalid request",
+            "schema": {}
+          },
+          "401": {
+            "description": "Unauthorized",
+            "schema": {}
+          },
+          "403": {
+            "description": "Forbidden",
+            "schema": {}
+          },
+          "404": {
+            "description": "Not found",
+            "schema": {}
+          },
+          "409": {
+            "description": "Session state conflict",
+            "schema": {}
+          }
+        },
+        "security": [
+          {
+            "AdminSessionCookie": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "type": "string"
+          },
+          {
+            "name": "body",
+            "in": "body",
+            "required": true,
+            "schema": {
+              "type": "object",
+              "required": [
+                "message",
+                "operationId"
+              ],
+              "properties": {
+                "message": {
+                  "type": "string"
+                },
+                "operationId": {
+                  "type": "string",
+                  "maxLength": 128
+                }
+              }
+            }
+          }
+        ]
       }
     },
     "/api/admin/contact-inquiries": {
@@ -114,7 +393,13 @@
             "description": "",
             "schema": {}
           }
-        }
+        },
+        "security": [
+          {
+            "AdminSessionCookie": []
+          }
+        ],
+        "parameters": []
       }
     },
     "/api/admin/contact-inquiries/{id}": {
@@ -132,7 +417,20 @@
             "description": "",
             "schema": {}
           }
-        }
+        },
+        "security": [
+          {
+            "AdminSessionCookie": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "type": "string"
+          }
+        ]
       },
       "patch": {
         "consumes": [
@@ -165,6 +463,12 @@
                 }
               }
             }
+          },
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "type": "string"
           }
         ],
         "responses": {
@@ -172,7 +476,12 @@
             "description": "",
             "schema": {}
           }
-        }
+        },
+        "security": [
+          {
+            "AdminSessionCookie": []
+          }
+        ]
       }
     },
     "/api/admin/session": {
@@ -190,7 +499,13 @@
             "description": "",
             "schema": {}
           }
-        }
+        },
+        "security": [
+          {
+            "AdminSessionCookie": []
+          }
+        ],
+        "parameters": []
       },
       "post": {
         "consumes": [
@@ -231,7 +546,12 @@
             "description": "",
             "schema": {}
           }
-        }
+        },
+        "security": [
+          {
+            "AdminSessionCookie": []
+          }
+        ]
       },
       "delete": {
         "produces": [
@@ -247,7 +567,13 @@
             "description": "",
             "schema": {}
           }
-        }
+        },
+        "security": [
+          {
+            "AdminSessionCookie": []
+          }
+        ],
+        "parameters": []
       }
     },
     "/api/admin/sessions": {
@@ -265,7 +591,13 @@
             "description": "",
             "schema": {}
           }
-        }
+        },
+        "security": [
+          {
+            "AdminSessionCookie": []
+          }
+        ],
+        "parameters": []
       },
       "delete": {
         "produces": [
@@ -281,7 +613,13 @@
             "description": "",
             "schema": {}
           }
-        }
+        },
+        "security": [
+          {
+            "AdminSessionCookie": []
+          }
+        ],
+        "parameters": []
       }
     },
     "/api/admin/sessions/{id}": {
@@ -299,7 +637,20 @@
             "description": "",
             "schema": {}
           }
-        }
+        },
+        "security": [
+          {
+            "AdminSessionCookie": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "type": "string"
+          }
+        ]
       }
     },
     "/api/admin/studio/audit-logs": {
@@ -317,7 +668,13 @@
             "description": "",
             "schema": {}
           }
-        }
+        },
+        "security": [
+          {
+            "AdminSessionCookie": []
+          }
+        ],
+        "parameters": []
       }
     },
     "/api/admin/studio/credentials": {
@@ -335,7 +692,13 @@
             "description": "",
             "schema": {}
           }
-        }
+        },
+        "security": [
+          {
+            "AdminSessionCookie": []
+          }
+        ],
+        "parameters": []
       },
       "post": {
         "produces": [
@@ -351,7 +714,13 @@
             "description": "",
             "schema": {}
           }
-        }
+        },
+        "security": [
+          {
+            "AdminSessionCookie": []
+          }
+        ],
+        "parameters": []
       }
     },
     "/api/admin/studio/credentials/{id}": {
@@ -369,7 +738,20 @@
             "description": "",
             "schema": {}
           }
-        }
+        },
+        "security": [
+          {
+            "AdminSessionCookie": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "type": "string"
+          }
+        ]
       },
       "patch": {
         "produces": [
@@ -385,7 +767,20 @@
             "description": "",
             "schema": {}
           }
-        }
+        },
+        "security": [
+          {
+            "AdminSessionCookie": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "type": "string"
+          }
+        ]
       }
     },
     "/api/admin/studio/credentials/{id}/test": {
@@ -403,7 +798,20 @@
             "description": "",
             "schema": {}
           }
-        }
+        },
+        "security": [
+          {
+            "AdminSessionCookie": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "type": "string"
+          }
+        ]
       }
     },
     "/api/admin/studio/executions": {
@@ -421,7 +829,13 @@
             "description": "",
             "schema": {}
           }
-        }
+        },
+        "security": [
+          {
+            "AdminSessionCookie": []
+          }
+        ],
+        "parameters": []
       },
       "post": {
         "consumes": [
@@ -470,7 +884,12 @@
             "description": "",
             "schema": {}
           }
-        }
+        },
+        "security": [
+          {
+            "AdminSessionCookie": []
+          }
+        ]
       }
     },
     "/api/admin/studio/executions/{id}": {
@@ -488,7 +907,20 @@
             "description": "",
             "schema": {}
           }
-        }
+        },
+        "security": [
+          {
+            "AdminSessionCookie": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "type": "string"
+          }
+        ]
       }
     },
     "/api/admin/studio/executions/{id}/approve": {
@@ -505,8 +937,25 @@
           "200": {
             "description": "",
             "schema": {}
+          },
+          "501": {
+            "description": "Not implemented",
+            "schema": {}
           }
-        }
+        },
+        "security": [
+          {
+            "AdminSessionCookie": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "type": "string"
+          }
+        ]
       }
     },
     "/api/admin/studio/executions/{id}/cancel": {
@@ -524,7 +973,20 @@
             "description": "",
             "schema": {}
           }
-        }
+        },
+        "security": [
+          {
+            "AdminSessionCookie": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "type": "string"
+          }
+        ]
       }
     },
     "/api/admin/studio/executions/{id}/pause": {
@@ -541,8 +1003,25 @@
           "200": {
             "description": "",
             "schema": {}
+          },
+          "501": {
+            "description": "Not implemented",
+            "schema": {}
           }
-        }
+        },
+        "security": [
+          {
+            "AdminSessionCookie": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "type": "string"
+          }
+        ]
       }
     },
     "/api/admin/studio/executions/{id}/retry": {
@@ -560,7 +1039,20 @@
             "description": "",
             "schema": {}
           }
-        }
+        },
+        "security": [
+          {
+            "AdminSessionCookie": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "type": "string"
+          }
+        ]
       }
     },
     "/api/admin/studio/http-request/import-curl": {
@@ -578,7 +1070,13 @@
             "description": "",
             "schema": {}
           }
-        }
+        },
+        "security": [
+          {
+            "AdminSessionCookie": []
+          }
+        ],
+        "parameters": []
       }
     },
     "/api/admin/studio/workflows": {
@@ -596,7 +1094,13 @@
             "description": "",
             "schema": {}
           }
-        }
+        },
+        "security": [
+          {
+            "AdminSessionCookie": []
+          }
+        ],
+        "parameters": []
       },
       "post": {
         "consumes": [
@@ -652,7 +1156,12 @@
             "description": "",
             "schema": {}
           }
-        }
+        },
+        "security": [
+          {
+            "AdminSessionCookie": []
+          }
+        ]
       }
     },
     "/api/admin/studio/workflows/{id}": {
@@ -670,7 +1179,20 @@
             "description": "",
             "schema": {}
           }
-        }
+        },
+        "security": [
+          {
+            "AdminSessionCookie": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "type": "string"
+          }
+        ]
       },
       "delete": {
         "produces": [
@@ -686,7 +1208,20 @@
             "description": "",
             "schema": {}
           }
-        }
+        },
+        "security": [
+          {
+            "AdminSessionCookie": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "type": "string"
+          }
+        ]
       },
       "patch": {
         "consumes": [
@@ -735,6 +1270,12 @@
                 }
               }
             }
+          },
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "type": "string"
           }
         ],
         "responses": {
@@ -742,7 +1283,12 @@
             "description": "",
             "schema": {}
           }
-        }
+        },
+        "security": [
+          {
+            "AdminSessionCookie": []
+          }
+        ]
       }
     },
     "/api/admin/studio/workflows/{id}/executions": {
@@ -760,7 +1306,20 @@
             "description": "",
             "schema": {}
           }
-        }
+        },
+        "security": [
+          {
+            "AdminSessionCookie": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "type": "string"
+          }
+        ]
       }
     },
     "/api/admin/studio/workflows/{id}/nodes/{nodeId}/execute": {
@@ -778,7 +1337,26 @@
             "description": "",
             "schema": {}
           }
-        }
+        },
+        "security": [
+          {
+            "AdminSessionCookie": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "type": "string"
+          },
+          {
+            "name": "nodeId",
+            "in": "path",
+            "required": true,
+            "type": "string"
+          }
+        ]
       }
     },
     "/api/admin/studio/workflows/{id}/nodes/{nodeId}/execute-previous": {
@@ -796,7 +1374,26 @@
             "description": "",
             "schema": {}
           }
-        }
+        },
+        "security": [
+          {
+            "AdminSessionCookie": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "type": "string"
+          },
+          {
+            "name": "nodeId",
+            "in": "path",
+            "required": true,
+            "type": "string"
+          }
+        ]
       }
     },
     "/api/admin/studio/workflows/{id}/nodes/{nodeId}/http-request": {
@@ -814,7 +1411,26 @@
             "description": "",
             "schema": {}
           }
-        }
+        },
+        "security": [
+          {
+            "AdminSessionCookie": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "type": "string"
+          },
+          {
+            "name": "nodeId",
+            "in": "path",
+            "required": true,
+            "type": "string"
+          }
+        ]
       }
     },
     "/api/admin/studio/workflows/{id}/nodes/{nodeId}/webhook-url": {
@@ -832,7 +1448,26 @@
             "description": "",
             "schema": {}
           }
-        }
+        },
+        "security": [
+          {
+            "AdminSessionCookie": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "type": "string"
+          },
+          {
+            "name": "nodeId",
+            "in": "path",
+            "required": true,
+            "type": "string"
+          }
+        ]
       }
     },
     "/api/admin/users": {
@@ -850,7 +1485,13 @@
             "description": "",
             "schema": {}
           }
-        }
+        },
+        "security": [
+          {
+            "AdminSessionCookie": []
+          }
+        ],
+        "parameters": []
       }
     },
     "/api/admin/users/{id}": {
@@ -882,6 +1523,12 @@
                 }
               }
             }
+          },
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "type": "string"
           }
         ],
         "responses": {
@@ -889,7 +1536,12 @@
             "description": "",
             "schema": {}
           }
-        }
+        },
+        "security": [
+          {
+            "AdminSessionCookie": []
+          }
+        ]
       }
     },
     "/api/ai/chat": {
@@ -952,7 +1604,7 @@
           "application/json"
         ],
         "produces": [
-          "application/json"
+          "text/event-stream"
         ],
         "schemes": [
           "https"
@@ -1056,8 +1708,17 @@
           "200": {
             "description": "",
             "schema": {}
+          },
+          "501": {
+            "description": "Not implemented",
+            "schema": {}
           }
-        }
+        },
+        "security": [
+          {
+            "AdminSessionCookie": []
+          }
+        ]
       }
     },
     "/api/ai/embed": {
@@ -1198,7 +1859,8 @@
             "description": "",
             "schema": {}
           }
-        }
+        },
+        "parameters": []
       }
     },
     "/api/ai/running": {
@@ -1216,7 +1878,8 @@
             "description": "",
             "schema": {}
           }
-        }
+        },
+        "parameters": []
       }
     },
     "/api/ai/version": {
@@ -1234,7 +1897,8 @@
             "description": "",
             "schema": {}
           }
-        }
+        },
+        "parameters": []
       }
     },
     "/api/articles": {
@@ -1252,7 +1916,8 @@
             "description": "",
             "schema": {}
           }
-        }
+        },
+        "parameters": []
       }
     },
     "/api/articles/{slug}": {
@@ -1270,7 +1935,15 @@
             "description": "",
             "schema": {}
           }
-        }
+        },
+        "parameters": [
+          {
+            "name": "slug",
+            "in": "path",
+            "required": true,
+            "type": "string"
+          }
+        ]
       }
     },
     "/api/contact": {
@@ -1345,7 +2018,8 @@
             "description": "",
             "schema": {}
           }
-        }
+        },
+        "parameters": []
       }
     },
     "/api/jobs/contact-follow-up": {
@@ -1383,8 +2057,17 @@
           "200": {
             "description": "",
             "schema": {}
+          },
+          "501": {
+            "description": "Not implemented",
+            "schema": {}
           }
-        }
+        },
+        "security": [
+          {
+            "InternalBearer": []
+          }
+        ]
       }
     },
     "/api/portfolio/assistant/chat": {
@@ -1398,7 +2081,9 @@
         "schemes": [
           "https"
         ],
-        "summary": "portfolioAssistantChat",
+        "summary": "portfolioAssistantChatDeprecated",
+        "description": "Deprecated fail-closed endpoint. Use /api/portfolio/assistant/chat/stream with an active persisted session.",
+        "deprecated": true,
         "operationId": "aiPortfolioAssistantChat",
         "parameters": [
           {
@@ -1434,8 +2119,8 @@
           }
         ],
         "responses": {
-          "200": {
-            "description": "",
+          "409": {
+            "description": "Active persisted streaming session required",
             "schema": {}
           }
         }
@@ -1447,7 +2132,7 @@
           "application/json"
         ],
         "produces": [
-          "application/json"
+          "text/event-stream"
         ],
         "schemes": [
           "https"
@@ -1461,6 +2146,11 @@
             "required": true,
             "schema": {
               "type": "object",
+              "required": [
+                "sessionId",
+                "runId",
+                "message"
+              ],
               "properties": {
                 "message": {
                   "type": "object",
@@ -1477,26 +2167,9 @@
                     }
                   }
                 },
-                "messages": {
-                  "type": "array",
-                  "items": {
-                    "type": "object",
-                    "required": [
-                      "role",
-                      "content"
-                    ],
-                    "properties": {
-                      "content": {
-                        "type": "string"
-                      },
-                      "role": {
-                        "type": "string"
-                      }
-                    }
-                  }
-                },
                 "runId": {
-                  "type": "string"
+                  "type": "string",
+                  "maxLength": 128
                 },
                 "sessionId": {
                   "type": "string"
@@ -1511,6 +2184,10 @@
         "responses": {
           "200": {
             "description": "",
+            "schema": {}
+          },
+          "409": {
+            "description": "Session state conflict",
             "schema": {}
           }
         }
@@ -1527,11 +2204,52 @@
         "summary": "portfolioAssistantNewSession",
         "operationId": "aiPortfolioAssistantNewSession",
         "responses": {
-          "200": {
-            "description": "",
+          "201": {
+            "description": "Session created",
+            "schema": {}
+          },
+          "400": {
+            "description": "Invalid request",
+            "schema": {}
+          },
+          "429": {
+            "description": "Rate limit exceeded",
+            "schema": {}
+          },
+          "503": {
+            "description": "Chat persistence unavailable",
             "schema": {}
           }
-        }
+        },
+        "parameters": [
+          {
+            "name": "body",
+            "in": "body",
+            "required": true,
+            "schema": {
+              "type": "object",
+              "required": [
+                "title"
+              ],
+              "properties": {
+                "title": {
+                  "type": "string",
+                  "maxLength": 200
+                },
+                "locale": {
+                  "type": "string",
+                  "enum": [
+                    "th",
+                    "en"
+                  ]
+                }
+              }
+            }
+          }
+        ],
+        "consumes": [
+          "application/json"
+        ]
       }
     },
     "/api/portfolio/assistant/sessions/current": {
@@ -1549,7 +2267,8 @@
             "description": "",
             "schema": {}
           }
-        }
+        },
+        "parameters": []
       }
     },
     "/api/portfolio/assistant/sessions/latest": {
@@ -1567,7 +2286,8 @@
             "description": "",
             "schema": {}
           }
-        }
+        },
+        "parameters": []
       }
     },
     "/api/portfolio/assistant/sessions/{id}": {
@@ -1585,13 +2305,86 @@
             "description": "",
             "schema": {}
           }
-        }
+        },
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "type": "string"
+          }
+        ]
+      }
+    },
+    "/api/portfolio/assistant/sessions/{id}/request-human": {
+      "post": {
+        "produces": [
+          "application/json"
+        ],
+        "schemes": [
+          "https"
+        ],
+        "summary": "portfolioAssistantRequestHuman",
+        "operationId": "aiPortfolioAssistantRequestHuman",
+        "responses": {
+          "200": {
+            "description": "Handoff requested",
+            "schema": {}
+          },
+          "400": {
+            "description": "Invalid request",
+            "schema": {}
+          },
+          "404": {
+            "description": "Not found",
+            "schema": {}
+          },
+          "409": {
+            "description": "Session state conflict",
+            "schema": {}
+          },
+          "429": {
+            "description": "Rate limited",
+            "schema": {}
+          }
+        },
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "type": "string"
+          }
+        ]
+      }
+    },
+    "/api/ready": {
+      "get": {
+        "produces": [
+          "application/json"
+        ],
+        "schemes": [
+          "https"
+        ],
+        "summary": "readiness",
+        "operationId": "publicReadiness",
+        "responses": {
+          "200": {
+            "description": "Ready",
+            "schema": {}
+          },
+          "503": {
+            "description": "Dependency unavailable",
+            "schema": {}
+          }
+        },
+        "parameters": []
       }
     },
     "/api/studio/executions/{id}/events": {
       "get": {
         "produces": [
-          "application/json"
+          "text/event-stream"
         ],
         "schemes": [
           "https"
@@ -1603,7 +2396,15 @@
             "description": "",
             "schema": {}
           }
-        }
+        },
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "type": "string"
+          }
+        ]
       }
     },
     "/api/studio/executions/{id}/stages": {
@@ -1621,7 +2422,15 @@
             "description": "",
             "schema": {}
           }
-        }
+        },
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "type": "string"
+          }
+        ]
       }
     },
     "/api/studio/overview": {
@@ -1639,7 +2448,8 @@
             "description": "",
             "schema": {}
           }
-        }
+        },
+        "parameters": []
       }
     },
     "/api/studio/webhooks/{id}/{nodeId}": {
@@ -1657,7 +2467,21 @@
             "description": "",
             "schema": {}
           }
-        }
+        },
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "type": "string"
+          },
+          {
+            "name": "nodeId",
+            "in": "path",
+            "required": true,
+            "type": "string"
+          }
+        ]
       },
       "post": {
         "produces": [
@@ -1673,7 +2497,21 @@
             "description": "",
             "schema": {}
           }
-        }
+        },
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "type": "string"
+          },
+          {
+            "name": "nodeId",
+            "in": "path",
+            "required": true,
+            "type": "string"
+          }
+        ]
       }
     }
   },
@@ -1681,5 +2519,19 @@
   "x-description": "This is a goctl generated swagger file.",
   "x-github": "https://github.com/zeromicro/go-zero",
   "x-go-zero-doc": "https://go-zero.dev/",
-  "x-goctl-version": "1.10.1"
+  "x-goctl-version": "1.10.1",
+  "securityDefinitions": {
+    "AdminSessionCookie": {
+      "type": "apiKey",
+      "name": "Cookie",
+      "in": "header",
+      "description": "Signed administrator session cookie."
+    },
+    "InternalBearer": {
+      "type": "apiKey",
+      "name": "Authorization",
+      "in": "header",
+      "description": "Internal bearer credential."
+    }
+  }
 }

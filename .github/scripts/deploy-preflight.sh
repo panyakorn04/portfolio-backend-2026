@@ -11,9 +11,23 @@ set -Eeuo pipefail
 : "${GITHUB_STEP_SUMMARY:?GITHUB_STEP_SUMMARY is required}"
 
 ACTION="${ACTION:-deploy}"
-MIGRATION_VERIFIED="${MIGRATION_VERIFIED:-false}"
 BEFORE_SHA="${BEFORE_SHA:-}"
 REQUESTED_IMAGE_SHA="${REQUESTED_IMAGE_SHA:-}"
+
+resolve_image_ref() {
+  local tagged_ref="$1"
+  local manifest_json digest
+  manifest_json="$(docker manifest inspect --verbose "$tagged_ref")" || return 1
+  digest="$(jq -r '
+    if type == "array" then
+      ([.[] | select(.Descriptor.platform.os == "linux" and .Descriptor.platform.architecture == "amd64") | .Descriptor.digest][0] // empty)
+    else
+      (.Descriptor.digest // .digest // empty)
+    end
+  ' <<<"$manifest_json")"
+  [[ "$digest" =~ ^sha256:[0-9a-f]{64}$ ]] || return 1
+  printf '%s@%s\n' "${tagged_ref%:*}" "$digest"
+}
 
 if [ "$ACTION" = rollback ]; then
   RELEASE_SHA="$REQUESTED_IMAGE_SHA"
@@ -39,30 +53,42 @@ http_code="$(curl --silent --show-error --output /dev/null --write-out '%{http_c
 echo "GHCR reachable (HTTP $http_code)"
 
 printf '%s\n' "$GH_TOKEN" | docker login ghcr.io --username "$GITHUB_ACTOR" --password-stdin >/dev/null
-current_image="${IMAGE_REPOSITORY}:${RELEASE_SHA}"
-docker manifest inspect "$current_image" >/dev/null
+current_tag="${IMAGE_REPOSITORY}:${RELEASE_SHA}"
+current_image="$(resolve_image_ref "$current_tag")" || {
+  echo "Release image is unavailable or has no immutable digest: $current_tag" >&2
+  exit 1
+}
 echo "Release image exists: $current_image"
 
 previous_sha=""
+previous_image=""
+successful_candidates=0
+candidate_shas="$(gh api "repos/${GITHUB_REPOSITORY}/actions/workflows/ci.yml/runs?per_page=20&status=success&event=push" --jq '.workflow_runs[].head_sha')" || {
+  echo "Unable to enumerate successful deployment candidates" >&2
+  exit 1
+}
 while IFS= read -r candidate; do
-  if [ -n "$candidate" ] && [ "$candidate" != "$RELEASE_SHA" ]; then
+  if [ -z "$candidate" ] || [ "$candidate" = "$RELEASE_SHA" ]; then
+    continue
+  fi
+  successful_candidates=$((successful_candidates + 1))
+  candidate_tag="${IMAGE_REPOSITORY}:${candidate}"
+  if candidate_image="$(resolve_image_ref "$candidate_tag" 2>/dev/null)"; then
     previous_sha="$candidate"
+    previous_image="$candidate_image"
     break
   fi
-done < <(gh api "repos/${GITHUB_REPOSITORY}/actions/workflows/ci.yml/runs?per_page=20&status=success&event=push" --jq '.workflow_runs[].head_sha')
+  echo "Skipping successful validation-only run without a pullable image: $candidate_tag"
+done <<< "$candidate_shas"
 
-previous_image=""
 rollback_worthy="first-deploy"
 if [ -n "$previous_sha" ]; then
-  previous_image="${IMAGE_REPOSITORY}:${previous_sha}"
-  if docker manifest inspect "$previous_image" >/dev/null 2>&1; then
-    rollback_worthy=true
-    echo "Rollback image exists: $previous_image"
-  else
-    rollback_worthy=false
-    echo "Previous successful image is not pullable: $previous_image" >&2
-    exit 1
-  fi
+  rollback_worthy=true
+  echo "Rollback image exists: $previous_image"
+elif [ "$successful_candidates" -gt 0 ]; then
+  rollback_worthy=false
+  echo "No pullable rollback image was found among the last $successful_candidates successful push runs" >&2
+  exit 1
 fi
 
 migrations=""
@@ -75,19 +101,6 @@ if [ "$ACTION" != rollback ]; then
     base_sha="$(git hash-object -t tree /dev/null)"
   fi
   migrations="$(git diff --name-only "$base_sha" "$GITHUB_SHA" -- 'migrations/*.sql' | paste -sd, -)"
-  if [ -n "$migrations" ] && [ "$MIGRATION_VERIFIED" != true ]; then
-    {
-      echo "## Production rollout preflight: NO-GO"
-      echo
-      echo "Production migrations require manual application and verification before deployment:"
-      echo
-      echo "\`$migrations\`"
-      echo
-      echo "Apply and verify them, then run workflow_dispatch with migration_verified enabled."
-    } >> "$GITHUB_STEP_SUMMARY"
-    echo "Unverified production migrations: $migrations" >&2
-    exit 1
-  fi
 fi
 
 {

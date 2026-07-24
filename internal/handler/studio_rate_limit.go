@@ -22,6 +22,12 @@ const (
 	studioMutationWindow = time.Minute
 	contactRateLimit     = 5
 	contactRateWindow    = 10 * time.Minute
+	aiInferenceRateLimit = 30
+	aiInferenceWindow    = time.Hour
+	chatCreateRateLimit  = 10
+	chatCreateWindow     = time.Hour
+	chatHandoffRateLimit = 5
+	chatHandoffWindow    = time.Hour
 )
 
 type rateWindow struct {
@@ -140,6 +146,28 @@ func enforceLoginRateLimit(w http.ResponseWriter, r *http.Request, s *svc.Servic
 func enforceContactRateLimit(w http.ResponseWriter, r *http.Request, s *svc.ServiceContext) bool {
 	ip := clientIP(r, s != nil && s.Config.TrustProxy)
 	if blocked, retry := limited(s, "contact:ip:"+ip, contactRateLimit, contactRateWindow, time.Now()); blocked {
+		writeRateLimited(w, retry)
+		return false
+	}
+	return true
+}
+
+func enforceAIInferenceRateLimit(w http.ResponseWriter, r *http.Request, s *svc.ServiceContext) bool {
+	ip := clientIP(r, s != nil && s.Config.TrustProxy)
+	if blocked, retry := limited(s, "ai:ip:"+ip, aiInferenceRateLimit, aiInferenceWindow, time.Now()); blocked {
+		writeRateLimited(w, retry)
+		return false
+	}
+	return true
+}
+
+func enforcePortfolioChatWriteRateLimit(w http.ResponseWriter, r *http.Request, s *svc.ServiceContext, action string) bool {
+	ip := clientIP(r, s != nil && s.Config.TrustProxy)
+	limit, window := chatCreateRateLimit, chatCreateWindow
+	if action == "handoff" {
+		limit, window = chatHandoffRateLimit, chatHandoffWindow
+	}
+	if blocked, retry := limited(s, "portfolio-chat:"+action+":ip:"+ip, limit, window, time.Now()); blocked {
 		writeRateLimited(w, retry)
 		return false
 	}

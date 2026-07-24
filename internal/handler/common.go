@@ -3,6 +3,7 @@ package handler
 import (
 	"encoding/json"
 	"errors"
+	"io"
 	"net/http"
 
 	"portfolio-backend/internal/auth"
@@ -17,9 +18,10 @@ func pathParam(r *http.Request, name string) string {
 	return pathvar.Vars(r)[name]
 }
 
-// decodeJSON parses the request body into v. Returns false (and writes a 400) on failure.
+// decodeJSON parses exactly one request-body JSON value into v. Returns false
+// (and writes a 400) on malformed JSON or trailing data.
 func decodeJSON(w http.ResponseWriter, r *http.Request, v any) bool {
-	if err := json.NewDecoder(r.Body).Decode(v); err != nil {
+	if err := decodeSingleJSON(r.Body, v); err != nil {
 		response.Error(w, http.StatusBadRequest, "Request body must be valid JSON.")
 		return false
 	}
@@ -33,7 +35,7 @@ func decodeJSONWithLimit(
 	maxBytes int64,
 ) bool {
 	r.Body = http.MaxBytesReader(w, r.Body, maxBytes)
-	if err := json.NewDecoder(r.Body).Decode(v); err != nil {
+	if err := decodeSingleJSON(r.Body, v); err != nil {
 		var maxBytesError *http.MaxBytesError
 		if errors.As(err, &maxBytesError) {
 			response.Error(w, http.StatusRequestEntityTooLarge, "Request body is too large.")
@@ -43,6 +45,19 @@ func decodeJSONWithLimit(
 		return false
 	}
 	return true
+}
+
+func decodeSingleJSON(r io.Reader, v any) error {
+	decoder := json.NewDecoder(r)
+	if err := decoder.Decode(v); err != nil {
+		return err
+	}
+	if err := decoder.Decode(&struct{}{}); errors.Is(err, io.EOF) {
+		return nil
+	} else if err != nil {
+		return err
+	}
+	return errors.New("request body must contain exactly one JSON value")
 }
 
 // decodeBodyAllowEmpty decodes the body but tolerates a missing/invalid body,

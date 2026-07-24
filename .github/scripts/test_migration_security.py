@@ -23,7 +23,10 @@ class BackendTableSecurityMigrationTest(unittest.TestCase):
                 )
             )
 
-        security_sql = SECURITY_MIGRATION.read_text()
+        security_sql = "\n".join(
+            path.read_text() for path in sorted(MIGRATIONS.glob("*.sql"))
+            if path.name >= SECURITY_MIGRATION.name
+        )
         rls_tables = set(
             re.findall(
                 r'ALTER\s+TABLE\s+"([^"]+)"\s+ENABLE\s+ROW\s+LEVEL\s+SECURITY',
@@ -31,18 +34,21 @@ class BackendTableSecurityMigrationTest(unittest.TestCase):
                 re.IGNORECASE,
             )
         )
-        revoke_blocks = re.findall(
-            r'REVOKE\s+ALL\s+ON\s+TABLE(.*?)FROM\s+PUBLIC,\s*anon,\s*authenticated\s*;',
+        revoke_statements = re.findall(
+            r'REVOKE\s+ALL\s+ON\s+TABLE(.*?)FROM\s+([^;]+);',
             security_sql,
             re.IGNORECASE | re.DOTALL,
         )
-        grant_blocks = re.findall(
-            r'GRANT\s+ALL\s+ON\s+TABLE(.*?)TO\s+service_role\s*;',
+        grant_statements = re.findall(
+            r'GRANT\s+(?:ALL|SELECT(?:\s*,\s*[A-Z]+)*)\s+ON\s+TABLE(.*?)TO\s+service_role\s*;',
             security_sql,
             re.IGNORECASE | re.DOTALL,
         )
-        revoked_tables = set().union(*(quoted_names(block) for block in revoke_blocks))
-        granted_tables = set().union(*(quoted_names(block) for block in grant_blocks))
+        revoked_tables = set().union(*(
+            quoted_names(block) for block, grantees in revoke_statements
+            if all(role in grantees.lower() for role in ("public", "anon", "authenticated"))
+        ))
+        granted_tables = set().union(*(quoted_names(block) for block in grant_statements))
 
         self.assertTrue(created_tables, "No application tables were discovered")
         self.assertEqual(created_tables - rls_tables, set(), "Tables missing RLS")
