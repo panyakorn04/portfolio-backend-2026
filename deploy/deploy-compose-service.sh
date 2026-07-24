@@ -62,10 +62,34 @@ trap cleanup EXIT
 printf '%s\n' "$GHCR_TOKEN" | docker login "$registry" --username "$GHCR_USERNAME" --password-stdin
 unset GHCR_TOKEN
 
-previous_image="$ROLLBACK_IMAGE"
 container_id="$(docker compose "${compose_args[@]}" ps -q "$SERVICE" 2>/dev/null || true)"
+previous_image=""
 
-# Fail before touching production when the rollback artifact is unavailable.
+# Derive the rollback artifact from the image that is actually running. Successful
+# workflow history can contain validation-only images that were never deployed.
+if [ -n "$container_id" ]; then
+  running_image_id="$(docker inspect --format='{{.Image}}' "$container_id")"
+  release_repository="${DEPLOY_IMAGE%@sha256:*}"
+  repo_digests="$(docker image inspect --format='{{join .RepoDigests ","}}' "$running_image_id")"
+  IFS=',' read -r -a digest_candidates <<< "$repo_digests"
+  for candidate in "${digest_candidates[@]}"; do
+    if [[ "$candidate" == "$release_repository"@sha256:* ]]; then
+      previous_image="$candidate"
+      break
+    fi
+  done
+  if [ -z "$previous_image" ]; then
+    set_rollout_status rollback_image_unavailable "$running_image_id"
+    echo "DEPLOY_ABORTED=running-release-has-no-immutable-registry-digest" >&2
+    exit 1
+  fi
+  if [ -n "$ROLLBACK_IMAGE" ] && [ "$ROLLBACK_IMAGE" != "$previous_image" ]; then
+    echo "Ignoring stale CI rollback candidate; using the running release digest" >&2
+  fi
+  echo "ROLLBACK_IMAGE_RESOLVED=$previous_image"
+fi
+
+# Fail before touching production when the running rollback artifact is unavailable.
 if [ -n "$previous_image" ]; then
   echo "Verifying rollback image is pullable: $previous_image"
   if ! docker pull "$previous_image" >/dev/null; then
@@ -73,21 +97,15 @@ if [ -n "$previous_image" ]; then
     echo "DEPLOY_ABORTED=rollback-image-unavailable" >&2
     exit 1
   fi
-  [ -n "$container_id" ] || {
-    set_rollout_status rollback_image_mismatch "$previous_image"
-    echo "DEPLOY_ABORTED=rollback-image-without-running-release" >&2
-    exit 1
-  }
-  running_image_id="$(docker inspect --format='{{.Image}}' "$container_id")"
   rollback_image_id="$(docker image inspect --format='{{.Id}}' "$previous_image")"
   if [ "$running_image_id" != "$rollback_image_id" ]; then
     set_rollout_status rollback_image_mismatch "$previous_image"
-    echo "DEPLOY_ABORTED=rollback-image-does-not-match-running-release" >&2
+    echo "DEPLOY_ABORTED=resolved-rollback-image-does-not-match-running-release" >&2
     exit 1
   fi
   echo "ROLLBACK_WORTHINESS=verified"
 else
-  echo "No previous image was discoverable; this deployment has no image rollback path" >&2
+  echo "No running release was discoverable; this is a first deployment without an image rollback path" >&2
   echo "ROLLBACK_WORTHINESS=unavailable"
 fi
 set_rollout_status preflight_passed "$previous_image"
