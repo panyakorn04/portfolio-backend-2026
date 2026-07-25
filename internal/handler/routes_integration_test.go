@@ -10,9 +10,10 @@ import (
 	"portfolio-backend/internal/svc"
 
 	"github.com/zeromicro/go-zero/rest"
+	"github.com/zeromicro/go-zero/rest/router"
 )
 
-func newRouteIntegrationServer(t *testing.T) *rest.Server {
+func newRouteIntegrationServer(t *testing.T) http.Handler {
 	t.Helper()
 	server := rest.MustNewServer(rest.RestConf{Host: "127.0.0.1", Port: 0})
 	t.Cleanup(server.Stop)
@@ -20,10 +21,17 @@ func newRouteIntegrationServer(t *testing.T) *rest.Server {
 		AdminApiToken:              "test",
 		PortfolioChatVisitorSecret: strings.Repeat("x", 32),
 	}})
-	return server
+
+	handler := router.NewRouter()
+	for _, route := range server.Routes() {
+		if err := handler.Handle(route.Method, route.Path, route.Handler); err != nil {
+			t.Fatalf("register %s %s: %v", route.Method, route.Path, err)
+		}
+	}
+	return handler
 }
 
-func serveRoute(server *rest.Server, method, target, body string) *httptest.ResponseRecorder {
+func serveRoute(server http.Handler, method, target, body string) *httptest.ResponseRecorder {
 	recorder := httptest.NewRecorder()
 	request := httptest.NewRequest(method, target, strings.NewReader(body))
 	if body != "" {
