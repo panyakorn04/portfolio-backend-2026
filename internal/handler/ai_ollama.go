@@ -4,7 +4,6 @@ import (
 	"encoding/json"
 	"net/http"
 	"strings"
-	"time"
 
 	"portfolio-backend/internal/model"
 	"portfolio-backend/internal/observability"
@@ -228,12 +227,7 @@ func validatePublicGenerateRequest(svcCtx *svc.ServiceContext, body aiGenerateRe
 }
 
 func allowAIInferenceRequest(w http.ResponseWriter, r *http.Request, svcCtx *svc.ServiceContext) bool {
-	clientKey := aiChatClientKey(r, svcCtx != nil && svcCtx.Config.TrustProxy)
-	if !aiChatLimiter.allow(clientKey, time.Now()) {
-		response.Error(w, http.StatusTooManyRequests, "Too many AI requests. Please try again later.")
-		return false
-	}
-	return true
+	return enforceAIInferenceRateLimit(w, r, svcCtx)
 }
 
 func decodeEmbedInput(raw json.RawMessage) (any, response.ErrorDetail, bool) {

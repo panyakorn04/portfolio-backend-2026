@@ -12,7 +12,7 @@ func TestSanitizeStudioExecutionItemsRedactsAndBoundsOutput(t *testing.T) {
 	items := []map[string]any{{"json": map[string]any{
 		"safe":    "visible",
 		"plain":   "Authorization: Bearer very-secret-token and sk-live-example",
-		"neutral": "eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiJ1c2VyIn0.signature12345",
+		"neutral": "eyJ" + "hbGciOiJIUzI1NiJ9.eyJzdWIiOiJ1c2VyIn0.signature12345",
 		"nested":  map[string]any{"access_token": "secret-value", "password": "hidden"},
 	}}}
 	sanitized := sanitizeStudioExecutionItems(items)

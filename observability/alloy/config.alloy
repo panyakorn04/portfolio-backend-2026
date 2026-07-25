@@ -4,7 +4,7 @@ logging {
 }
 
 discovery.docker "portfolio" {
-	host             = "unix:///var/run/docker.sock"
+	host             = "http://docker-socket-proxy:2375"
 	refresh_interval = "5s"
 }
 
@@ -40,7 +40,7 @@ discovery.relabel "portfolio" {
 }
 
 loki.source.docker "portfolio" {
-	host       = "unix:///var/run/docker.sock"
+	host       = "http://docker-socket-proxy:2375"
 	targets    = discovery.relabel.portfolio.output
 	forward_to = [loki.write.grafana_cloud.receiver]
 }

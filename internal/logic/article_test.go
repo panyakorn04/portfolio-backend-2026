@@ -71,6 +71,7 @@ func TestValidateArticlePayloadAcceptsMDXContent(t *testing.T) {
 	}
 	if input == nil {
 		t.Fatal("ValidateArticlePayload() input = nil, want normalized input")
+		return
 	}
 	if got := input.Translations[0].Content; got != payload.Translations[0].Content {
 		t.Fatalf("English content = %q, want %q", got, payload.Translations[0].Content)

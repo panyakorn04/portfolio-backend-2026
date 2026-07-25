@@ -58,6 +58,7 @@ type PortfolioChatMessage struct {
 	Content   string         `json:"content"`
 	CreatedAt time.Time      `json:"createdAt"`
 	Metadata  map[string]any `json:"metadata,omitempty"`
+	RunID     *string        `json:"runId,omitempty"`
 }
 
 type ContactInquiry struct {

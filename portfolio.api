@@ -117,6 +117,9 @@ service portfolio-api {
 	@handler health
 	get /api/health
 
+	@handler readiness
+	get /api/ready
+
 	@handler contact
 	post /api/contact (ContactRequest)
 
@@ -163,6 +166,18 @@ service portfolio-api {
 
 	@handler updateInquiry
 	patch /api/admin/contact-inquiries/:id (UpdateInquiryRequest)
+
+	@handler listChatSessions
+	get /api/admin/chat/sessions
+
+	@handler getChatSession
+	get /api/admin/chat/sessions/:id
+
+	@handler replyChatSession
+	post /api/admin/chat/sessions/:id/reply
+
+	@handler updateChatSession
+	patch /api/admin/chat/sessions/:id
 
 	@handler listSessions
 	get /api/admin/sessions
@@ -297,6 +312,9 @@ service portfolio-api {
 
 	@handler portfolioAssistantDeleteSession
 	delete /api/portfolio/assistant/sessions/:id
+
+	@handler portfolioAssistantRequestHuman
+	post /api/portfolio/assistant/sessions/:id/request-human
 
 	@handler aiGenerate
 	post /api/ai/generate (AIGenerateRequest)

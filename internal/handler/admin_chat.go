@@ -6,6 +6,7 @@ import (
 	"strings"
 	"time"
 
+	"portfolio-backend/internal/model"
 	"portfolio-backend/internal/observability"
 	"portfolio-backend/internal/response"
 	"portfolio-backend/internal/svc"
@@ -43,7 +44,8 @@ type adminChatSessionDetailDTO struct {
 }
 
 type adminChatReplyRequest struct {
-	Message string `json:"message"`
+	Message     string `json:"message"`
+	OperationID string `json:"operationId"`
 }
 
 type adminChatUpdateStatusRequest struct {
@@ -52,10 +54,10 @@ type adminChatUpdateStatusRequest struct {
 
 func AdminListChatSessionsHandler(svcCtx *svc.ServiceContext) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		if !requireDatabase(w, svcCtx) {
+		if _, ok := requireAdmin(w, r, svcCtx); !ok {
 			return
 		}
-		if _, ok := requireAdmin(w, r, svcCtx); !ok {
+		if !requireDatabase(w, svcCtx) {
 			return
 		}
 
@@ -107,10 +109,10 @@ func AdminListChatSessionsHandler(svcCtx *svc.ServiceContext) http.HandlerFunc {
 
 func AdminGetChatSessionHandler(svcCtx *svc.ServiceContext) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		if !requireDatabase(w, svcCtx) {
+		if _, ok := requireAdmin(w, r, svcCtx); !ok {
 			return
 		}
-		if _, ok := requireAdmin(w, r, svcCtx); !ok {
+		if !requireDatabase(w, svcCtx) {
 			return
 		}
 
@@ -165,14 +167,14 @@ func AdminGetChatSessionHandler(svcCtx *svc.ServiceContext) http.HandlerFunc {
 
 func AdminReplyChatSessionHandler(svcCtx *svc.ServiceContext) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		if !requireDatabase(w, svcCtx) {
-			return
-		}
 		access, ok := requireAdmin(w, r, svcCtx)
 		if !ok {
 			return
 		}
 		if !assertRole(w, access, []string{"admin", "editor"}) {
+			return
+		}
+		if !requireDatabase(w, svcCtx) {
 			return
 		}
 
@@ -183,7 +185,7 @@ func AdminReplyChatSessionHandler(svcCtx *svc.ServiceContext) http.HandlerFunc {
 		}
 
 		var payload adminChatReplyRequest
-		if !decodeJSON(w, r, &payload) {
+		if !decodeJSONWithLimit(w, r, &payload, maxAIChatBodyBytes) {
 			return
 		}
 		message := strings.TrimSpace(payload.Message)
@@ -191,38 +193,47 @@ func AdminReplyChatSessionHandler(svcCtx *svc.ServiceContext) http.HandlerFunc {
 			response.Error(w, http.StatusBadRequest, "Message is required.")
 			return
 		}
-
-		session, err := svcCtx.PortfolioChatSessions.FindByID(r.Context(), sessionID)
-		if err != nil {
-			observability.Error(r.Context(), "admin_chat.reply.session_lookup_failed", "Admin chat reply session lookup failed", err)
-			response.Error(w, http.StatusInternalServerError, "Unable to load chat session.")
+		if len([]rune(message)) > maxAIChatContentLength {
+			response.Error(w, http.StatusBadRequest, "Message is too long.")
 			return
 		}
-		if session == nil {
+		operationID := strings.TrimSpace(payload.OperationID)
+		if operationID == "" || len(operationID) > 128 {
+			response.Error(w, http.StatusBadRequest, "operationId is required and must be at most 128 characters.")
+			return
+		}
+
+		adminName := ""
+		if access.User != nil && access.User.Name != nil {
+			adminName = *access.User.Name
+		} else if access.User != nil {
+			adminName = access.User.Email
+		}
+
+		result, err := svcCtx.PortfolioChatSessions.TakeoverAndReply(r.Context(), model.PortfolioChatTakeoverReplyInput{
+			SessionID: sessionID, TakeoverMessageID: "admin-takeover-" + operationID,
+			ReplyMessageID: "admin-reply-" + operationID, ReplyContent: message, AdminName: adminName,
+			MaxMessages: portfolioChatMaxStoredMessages(svcCtx), OccurredAt: time.Now().UTC(),
+		})
+		if err != nil {
+			observability.Error(r.Context(), "admin_chat.reply.atomic_failed", "Admin chat reply transaction failed", err)
+			response.Error(w, http.StatusInternalServerError, "Unable to send reply.")
+			return
+		}
+		if result.Outcome == model.PortfolioChatOutcomeNotFound {
 			response.Error(w, http.StatusNotFound, "Chat session not found.")
 			return
 		}
-
-		meta := map[string]any{"source": "admin"}
-		if access.User != nil && access.User.Name != nil {
-			meta["adminName"] = *access.User.Name
-		} else if access.User != nil {
-			meta["adminName"] = access.User.Email
+		if result.Outcome == model.PortfolioChatOutcomeIdempotencyConflict {
+			response.Error(w, http.StatusConflict, "operationId was already used for a different reply.")
+			return
 		}
-
-		if session.Status == "active" {
-			if err := svcCtx.PortfolioChatSessions.UpdateStatus(r.Context(), sessionID, "human"); err != nil {
-				observability.Error(r.Context(), "admin_chat.reply.status_update_failed", "Admin chat reply status update failed", err)
-			}
-		}
-
-		msg, err := svcCtx.PortfolioChatMessages.Append(r.Context(), sessionID, "assistant", "chat", message, meta)
-		if err != nil {
-			observability.Error(r.Context(), "admin_chat.reply.message_append_failed", "Admin chat reply persistence failed", err)
+		if (result.Outcome != model.PortfolioChatOutcomeReplied && result.Outcome != model.PortfolioChatOutcomeReplayed) || result.ReplyMessage == nil {
 			response.Error(w, http.StatusInternalServerError, "Unable to send reply.")
 			return
 		}
 
+		msg := result.ReplyMessage
 		response.Ok(w, http.StatusCreated, adminChatMessageDTO{
 			ID:        msg.ID,
 			Role:      msg.Role,
@@ -236,14 +247,14 @@ func AdminReplyChatSessionHandler(svcCtx *svc.ServiceContext) http.HandlerFunc {
 
 func AdminUpdateChatSessionHandler(svcCtx *svc.ServiceContext) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		if !requireDatabase(w, svcCtx) {
-			return
-		}
 		access, ok := requireAdmin(w, r, svcCtx)
 		if !ok {
 			return
 		}
 		if !assertRole(w, access, []string{"admin", "editor"}) {
+			return
+		}
+		if !requireDatabase(w, svcCtx) {
 			return
 		}
 

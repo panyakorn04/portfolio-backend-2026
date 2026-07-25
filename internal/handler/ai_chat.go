@@ -1,6 +1,9 @@
 package handler
 
 import (
+	"context"
+	"crypto/rand"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -17,14 +20,12 @@ const (
 	maxAIChatMessages      = 20
 	maxAIChatContentLength = 4000
 	maxAIChatBodyBytes     = 64 * 1024
-	aiChatRequestsPerHour  = 30
+	portfolioChatRunLease  = 10 * time.Minute
 
 	aiConsoleSkillProfile     = "ai-console"
 	aiConsolePrimarySkill     = "anti-hallucination-guardrails"
 	portfolioSiteSkillProfile = "portfolio-site"
 )
-
-var aiChatLimiter = newAIChatRateLimiter(aiChatRequestsPerHour, time.Hour)
 
 type aiChatRequest struct {
 	Model    string                    `json:"model"`
@@ -62,9 +63,11 @@ func PortfolioAssistantChatHandler(svcCtx *svc.ServiceContext) http.HandlerFunc 
 
 func aiChatHandlerForProfile(svcCtx *svc.ServiceContext, skillProfile string) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		clientKey := aiChatClientKey(r, svcCtx != nil && svcCtx.Config.TrustProxy)
-		if !aiChatLimiter.allow(clientKey, time.Now()) {
-			response.Error(w, http.StatusTooManyRequests, "Too many AI chat requests. Please try again later.")
+		if skillProfile == portfolioSiteSkillProfile {
+			response.Error(w, http.StatusConflict, "Portfolio assistant replies require an active persisted session and the streaming endpoint.")
+			return
+		}
+		if !enforceAIInferenceRateLimit(w, r, svcCtx) {
 			return
 		}
 
@@ -122,9 +125,7 @@ func PortfolioAssistantChatStreamHandler(svcCtx *svc.ServiceContext) http.Handle
 
 func aiChatStreamHandlerForProfile(svcCtx *svc.ServiceContext, skillProfile string) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		clientKey := aiChatClientKey(r, svcCtx != nil && svcCtx.Config.TrustProxy)
-		if !aiChatLimiter.allow(clientKey, time.Now()) {
-			response.Error(w, http.StatusTooManyRequests, "Too many AI chat requests. Please try again later.")
+		if !enforceAIInferenceRateLimit(w, r, svcCtx) {
 			return
 		}
 
@@ -145,8 +146,28 @@ func aiChatStreamHandlerForProfile(svcCtx *svc.ServiceContext, skillProfile stri
 		streamMessages := body.Messages
 		var persistedSession *model.PortfolioChatSession
 		var persistedUserMessage *model.OllamaChatMessage
+		var persistedVisitorHash string
+		var replayedAssistantContent string
+		var replayedModelName string
+		replayedExchange := false
+		var claimLeaseOwner string
+		claimActive := false
+		defer func() {
+			if !claimActive || svcCtx.PortfolioChatMessages == nil {
+				return
+			}
+			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			defer cancel()
+			if err := svcCtx.PortfolioChatMessages.ReleaseRun(ctx, body.SessionID, persistedVisitorHash, body.RunID, claimLeaseOwner); err != nil {
+				observability.Error(ctx, "portfolio_chat.run.release_failed", "Portfolio chat run claim release failed", err)
+			}
+		}()
 
-		if skillProfile == portfolioSiteSkillProfile && body.SessionID != "" && body.Message != nil {
+		if skillProfile == portfolioSiteSkillProfile {
+			if body.SessionID == "" || body.Message == nil || len(body.Messages) != 0 {
+				response.Error(w, http.StatusBadRequest, "Persisted portfolio chat requires sessionId, runId, and one message field; messages is not accepted.")
+				return
+			}
 			message := model.OllamaChatMessage{Role: strings.TrimSpace(body.Message.Role), Content: strings.TrimSpace(body.Message.Content)}
 			if errDetail, ok := validateAIChatMessages([]model.OllamaChatMessage{message}); !ok {
 				response.Error(w, http.StatusBadRequest, "Invalid chat request.", errDetail)
@@ -170,16 +191,71 @@ func aiChatStreamHandlerForProfile(svcCtx *svc.ServiceContext, skillProfile stri
 				response.Error(w, http.StatusNotFound, "Chat session was not found.")
 				return
 			}
-			storedMessages, err := svcCtx.PortfolioChatMessages.ListForSession(r.Context(), session.ID, maxAIChatMessages-1)
+			if session.Status != "active" {
+				response.Error(w, http.StatusConflict, "AI replies are disabled after human handoff.")
+				return
+			}
+			if body.RunID == "" || len(body.RunID) > 128 {
+				response.Error(w, http.StatusBadRequest, "runId is required and must be at most 128 characters for persisted chat.")
+				return
+			}
+			persistedSession = session
+			persistedUserMessage = &message
+			persistedVisitorHash = visitorHash
+			claimLeaseOwner, err = newPortfolioChatLeaseOwner()
+			if err != nil {
+				observability.Error(r.Context(), "portfolio_chat.run.owner_failed", "Portfolio chat run owner generation failed", err)
+				response.Error(w, http.StatusInternalServerError, "Unable to initialize AI run.")
+				return
+			}
+			claimNow := time.Now().UTC()
+			claim, err := svcCtx.PortfolioChatMessages.ClaimRun(r.Context(), model.PortfolioChatRunClaimInput{
+				SessionID: session.ID, VisitorIDHash: visitorHash, RunID: body.RunID, UserContent: message.Content,
+				LeaseOwner: claimLeaseOwner, LeaseUntil: claimNow.Add(portfolioChatRunLease), OccurredAt: claimNow,
+			})
+			if err != nil || claim == nil {
+				if err != nil {
+					observability.Error(r.Context(), "portfolio_chat.run.claim_failed", "Portfolio chat run claim failed", err)
+				}
+				response.Error(w, http.StatusServiceUnavailable, "Unable to reserve AI run safely.")
+				return
+			}
+			switch claim.Outcome {
+			case model.PortfolioChatOutcomeClaimed:
+				claimActive = true
+			case model.PortfolioChatOutcomeReplayed:
+				replayedAssistantContent = claim.AssistantContent
+				replayedModelName = claim.ModelName
+				replayedExchange = true
+			case model.PortfolioChatOutcomeInProgress:
+				w.Header().Set("Retry-After", "3")
+				response.Error(w, http.StatusConflict, "This AI run is already in progress. Retry with the same runId.")
+				return
+			case model.PortfolioChatOutcomeIdempotencyConflict:
+				response.Error(w, http.StatusConflict, "runId was already used for a different or incomplete chat exchange.")
+				return
+			case model.PortfolioChatOutcomeStateConflict:
+				response.Error(w, http.StatusConflict, "AI replies are disabled after human handoff.")
+				return
+			case model.PortfolioChatOutcomeNotFound:
+				response.Error(w, http.StatusNotFound, "Chat session was not found.")
+				return
+			default:
+				response.Error(w, http.StatusServiceUnavailable, "Unable to reserve AI run safely.")
+				return
+			}
+			storedMessages, err := svcCtx.PortfolioChatMessages.ListForSession(r.Context(), session.ID, portfolioChatMaxStoredMessages(svcCtx))
 			if err != nil {
 				observability.Error(r.Context(), "portfolio_chat.stream.messages_lookup_failed", "Portfolio chat stream message lookup failed", err)
 				response.Error(w, http.StatusServiceUnavailable, "Unable to load chat messages.")
 				return
 			}
-			streamMessages = append(portfolioStoredMessagesToOllama(storedMessages), message)
+			history := storedMessages
+			if len(history) > maxAIChatMessages-1 {
+				history = history[len(history)-(maxAIChatMessages-1):]
+			}
+			streamMessages = append(portfolioStoredMessagesToOllama(history), message)
 			body.ThreadID = session.ThreadID
-			persistedSession = session
-			persistedUserMessage = &message
 		}
 
 		if body.ThreadID == "" {
@@ -201,6 +277,9 @@ func aiChatStreamHandlerForProfile(svcCtx *svc.ServiceContext, skillProfile stri
 		}
 
 		modelName := selectedModel
+		if replayedModelName != "" {
+			modelName = replayedModelName
+		}
 		messageID := "assistant-" + body.RunID
 		w.Header().Set("Content-Type", "text/event-stream; charset=utf-8")
 		w.Header().Set("Cache-Control", "no-cache, no-transform")
@@ -235,19 +314,27 @@ func aiChatStreamHandlerForProfile(svcCtx *svc.ServiceContext, skillProfile stri
 
 		var finalChunk model.OllamaChatResponse
 		var assistantContent strings.Builder
-		messages, err := messagesWithSkillProfile(svcCtx, skillProfile, streamMessages)
-		if err != nil {
-			observability.Error(r.Context(), "ai.chat.stream.skill_profile_failed", "AI chat stream skill profile loading failed", err)
-			_ = writeAIStreamEvent(w, flusher, map[string]any{
-				"type":      "RUN_ERROR",
-				"timestamp": time.Now().UnixMilli(),
-				"threadId":  body.ThreadID,
-				"runId":     body.RunID,
-				"model":     modelName,
-				"message":   "Unable to load AI skill context.",
-				"code":      "SKILL_PROFILE_ERROR",
-			})
-			return
+		var bufferedDeltas []string
+		var messages []model.OllamaChatMessage
+		var err error
+		if replayedExchange {
+			assistantContent.WriteString(replayedAssistantContent)
+			bufferedDeltas = append(bufferedDeltas, replayedAssistantContent)
+		} else {
+			messages, err = messagesWithSkillProfile(svcCtx, skillProfile, streamMessages)
+			if err != nil {
+				observability.Error(r.Context(), "ai.chat.stream.skill_profile_failed", "AI chat stream skill profile loading failed", err)
+				_ = writeAIStreamEvent(w, flusher, map[string]any{
+					"type":      "RUN_ERROR",
+					"timestamp": time.Now().UnixMilli(),
+					"threadId":  body.ThreadID,
+					"runId":     body.RunID,
+					"model":     modelName,
+					"message":   "Unable to load AI skill context.",
+					"code":      "SKILL_PROFILE_ERROR",
+				})
+				return
+			}
 		}
 
 		if err := writeAIStreamStage(w, flusher, body.ThreadID, body.RunID, modelName, "drafting", "Drafting the response", "Streaming an answer grounded in the allowed portfolio context."); err != nil {
@@ -265,45 +352,83 @@ func aiChatStreamHandlerForProfile(svcCtx *svc.ServiceContext, skillProfile stri
 			return
 		}
 
-		err = svcCtx.Ollama.ChatStreamWithModel(r.Context(), selectedModel, messages, func(chunk model.OllamaChatResponse) error {
-			if chunk.Model != "" {
-				modelName = chunk.Model
-			}
-			if chunk.Message != nil && chunk.Message.Content != "" {
-				assistantContent.WriteString(chunk.Message.Content)
-				if err := writeAIStreamEvent(w, flusher, map[string]any{
-					"type":      "TEXT_MESSAGE_CONTENT",
-					"timestamp": time.Now().UnixMilli(),
-					"messageId": messageID,
-					"delta":     chunk.Message.Content,
-					"content":   chunk.Message.Content,
-					"model":     modelName,
-				}); err != nil {
-					return err
+		if !replayedExchange {
+			err = svcCtx.Ollama.ChatStreamWithModel(r.Context(), selectedModel, messages, func(chunk model.OllamaChatResponse) error {
+				if chunk.Model != "" {
+					modelName = chunk.Model
 				}
-			}
-			if chunk.Done {
-				finalChunk = chunk
-			}
-			return nil
-		})
-		if err != nil {
-			observability.Error(r.Context(), "ai.chat.stream.ollama_failed", "AI chat stream Ollama request failed", err)
-			_ = writeAIStreamEvent(w, flusher, map[string]any{
-				"type":      "RUN_ERROR",
-				"timestamp": time.Now().UnixMilli(),
-				"threadId":  body.ThreadID,
-				"runId":     body.RunID,
-				"model":     modelName,
-				"message":   "Unable to stream a response from the AI model.",
-				"code":      "OLLAMA_STREAM_ERROR",
+				if chunk.Message != nil && chunk.Message.Content != "" {
+					assistantContent.WriteString(chunk.Message.Content)
+					if persistedSession != nil {
+						bufferedDeltas = append(bufferedDeltas, chunk.Message.Content)
+					} else if err := writeAIStreamContent(w, flusher, messageID, modelName, chunk.Message.Content); err != nil {
+						return err
+					}
+				}
+				if chunk.Done {
+					finalChunk = chunk
+				}
+				return nil
 			})
-			return
+			if err != nil {
+				observability.Error(r.Context(), "ai.chat.stream.ollama_failed", "AI chat stream Ollama request failed", err)
+				_ = writeAIStreamEvent(w, flusher, map[string]any{
+					"type":      "RUN_ERROR",
+					"timestamp": time.Now().UnixMilli(),
+					"threadId":  body.ThreadID,
+					"runId":     body.RunID,
+					"model":     modelName,
+					"message":   "Unable to stream a response from the AI model.",
+					"code":      "OLLAMA_STREAM_ERROR",
+				})
+				return
+			}
 		}
 
 		if err := writeAIStreamStage(w, flusher, body.ThreadID, body.RunID, modelName, "evaluating", "Reviewing for accuracy", "Checking that the answer stays within the public portfolio scope."); err != nil {
 			observability.Error(r.Context(), "ai.chat.stream.write_failed", "AI chat stream write failed", err)
 			return
+		}
+		if persistedSession != nil && persistedUserMessage != nil && !replayedExchange {
+			if assistantContent.Len() == 0 {
+				_ = writeAIStreamEvent(w, flusher, map[string]any{
+					"type": "RUN_ERROR", "timestamp": time.Now().UnixMilli(), "threadId": body.ThreadID,
+					"runId": body.RunID, "model": modelName, "message": "The AI model returned an empty response.", "code": "EMPTY_AI_RESPONSE",
+				})
+				return
+			}
+			result, persistErr := svcCtx.PortfolioChatMessages.CompleteRun(r.Context(), model.PortfolioChatExchangeInput{
+				SessionID: persistedSession.ID, VisitorIDHash: persistedVisitorHash, RunID: body.RunID,
+				LeaseOwner:  claimLeaseOwner,
+				UserContent: persistedUserMessage.Content, AssistantContent: assistantContent.String(), ModelName: modelName,
+				ExpiresAt: portfolioChatExpiresAt(svcCtx), MaxMessages: portfolioChatMaxStoredMessages(svcCtx), OccurredAt: time.Now().UTC(),
+			})
+			if persistErr != nil || result == nil || (result.Outcome != model.PortfolioChatOutcomeInserted && result.Outcome != model.PortfolioChatOutcomeReplayed) {
+				if persistErr != nil {
+					observability.Error(r.Context(), "portfolio_chat.exchange.persist_failed", "Portfolio chat exchange persistence failed", persistErr)
+				}
+				code := "CHAT_PERSISTENCE_ERROR"
+				if result != nil && result.Outcome == model.PortfolioChatOutcomeStateConflict {
+					code = "CHAT_STATE_CONFLICT"
+				} else if result != nil && result.Outcome == model.PortfolioChatOutcomeIdempotencyConflict {
+					code = "CHAT_IDEMPOTENCY_CONFLICT"
+				}
+				_ = writeAIStreamEvent(w, flusher, map[string]any{
+					"type": "RUN_ERROR", "timestamp": time.Now().UnixMilli(), "threadId": body.ThreadID,
+					"runId": body.RunID, "model": modelName,
+					"message": "The response could not be saved safely. Please retry with the same runId.", "code": code,
+				})
+				return
+			}
+			claimActive = false
+		}
+		if persistedSession != nil {
+			for _, delta := range bufferedDeltas {
+				if err := writeAIStreamContent(w, flusher, messageID, modelName, delta); err != nil {
+					observability.Error(r.Context(), "ai.chat.stream.write_failed", "AI chat stream write failed", err)
+					return
+				}
+			}
 		}
 		if err := writeAIStreamEvent(w, flusher, map[string]any{
 			"type":      "TEXT_MESSAGE_END",
@@ -333,12 +458,15 @@ func aiChatStreamHandlerForProfile(svcCtx *svc.ServiceContext, skillProfile stri
 			observability.Error(r.Context(), "ai.chat.stream.write_failed", "AI chat stream write failed", err)
 			return
 		}
-		if persistedSession != nil && persistedUserMessage != nil && assistantContent.Len() > 0 {
-			if err := persistPortfolioChatExchange(r, svcCtx, persistedSession.ID, *persistedUserMessage, assistantContent.String(), modelName); err != nil {
-				observability.Error(r.Context(), "portfolio_chat.exchange.persist_failed", "Portfolio chat exchange persistence failed", err)
-			}
-		}
 	}
+}
+
+func newPortfolioChatLeaseOwner() (string, error) {
+	var value [16]byte
+	if _, err := rand.Read(value[:]); err != nil {
+		return "", err
+	}
+	return hex.EncodeToString(value[:]), nil
 }
 
 func portfolioStoredMessagesToOllama(messages []model.PortfolioChatMessage) []model.OllamaChatMessage {
@@ -354,17 +482,15 @@ func portfolioStoredMessagesToOllama(messages []model.PortfolioChatMessage) []mo
 	return items
 }
 
-func persistPortfolioChatExchange(r *http.Request, svcCtx *svc.ServiceContext, sessionID string, userMessage model.OllamaChatMessage, assistantContent, modelName string) error {
-	if svcCtx.PortfolioChatMessages == nil || svcCtx.PortfolioChatSessions == nil {
-		return nil
-	}
-	if _, err := svcCtx.PortfolioChatMessages.Append(r.Context(), sessionID, "user", "chat", strings.TrimSpace(userMessage.Content), map[string]any{"source": "portfolio-widget"}); err != nil {
-		return err
-	}
-	if _, err := svcCtx.PortfolioChatMessages.Append(r.Context(), sessionID, "assistant", "chat", strings.TrimSpace(assistantContent), map[string]any{"source": "portfolio-widget", "model": modelName}); err != nil {
-		return err
-	}
-	return svcCtx.PortfolioChatSessions.Touch(r.Context(), sessionID, portfolioChatExpiresAt(svcCtx))
+func writeAIStreamContent(w http.ResponseWriter, flusher http.Flusher, messageID, modelName, content string) error {
+	return writeAIStreamEvent(w, flusher, map[string]any{
+		"type":      "TEXT_MESSAGE_CONTENT",
+		"timestamp": time.Now().UnixMilli(),
+		"messageId": messageID,
+		"delta":     content,
+		"content":   content,
+		"model":     modelName,
+	})
 }
 
 func writeAIStreamStage(w http.ResponseWriter, flusher http.Flusher, threadID, runID, modelName, stage, label, detail string) error {
