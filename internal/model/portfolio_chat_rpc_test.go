@@ -9,6 +9,19 @@ import (
 	"time"
 )
 
+func TestPortfolioChatMessageFromRowRejectsMalformedTimestamp(t *testing.T) {
+	message, err := portfolioChatMessageFromRow(&portfolioChatMessageRow{
+		ID:        "message-1",
+		SessionID: "session-1",
+		Role:      "assistant",
+		Content:   "hello",
+		CreatedAt: "not-a-timestamp",
+	})
+	if err == nil || message != nil {
+		t.Fatalf("message = %#v, err = %v", message, err)
+	}
+}
+
 func TestPortfolioChatTransactionalRPCContracts(t *testing.T) {
 	t.Parallel()
 
@@ -27,13 +40,13 @@ func TestPortfolioChatTransactionalRPCContracts(t *testing.T) {
 		case "/rest/v1/rpc/claimPortfolioChatRun":
 			_, _ = w.Write([]byte(`[{"outcome":"claimed"}]`))
 		case "/rest/v1/rpc/completePortfolioChatRun":
-			_, _ = w.Write([]byte(`[{"outcome":"inserted","userMessage":{"id":"user-message","sessionId":"session-1","role":"user","type":"chat","content":"hello","createdAt":"2026-07-23T15:00:00Z"},"assistantMessage":{"id":"assistant-message","sessionId":"session-1","role":"assistant","type":"chat","content":"hi","createdAt":"2026-07-23T15:00:00Z"}}]`))
+			_, _ = w.Write([]byte(`[{"outcome":"inserted","userMessage":{"id":"user-message","sessionId":"session-1","role":"user","type":"chat","content":"hello","createdAt":"2026-07-23T15:00:00.123456"},"assistantMessage":{"id":"assistant-message","sessionId":"session-1","role":"assistant","type":"chat","content":"hi","createdAt":"2026-07-23T15:00:00.123457"}}]`))
 		case "/rest/v1/rpc/releasePortfolioChatRun":
 			_, _ = w.Write([]byte(`true`))
 		case "/rest/v1/rpc/requestPortfolioChatHuman":
-			_, _ = w.Write([]byte(`[{"outcome":"updated","status":"pending_human","eventMessage":{"id":"event-message","sessionId":"session-1","role":"system","type":"request_human","content":"Visitor requested a human response.","createdAt":"2026-07-23T15:00:00Z"}}]`))
+			_, _ = w.Write([]byte(`[{"outcome":"updated","status":"pending_human","eventMessage":{"id":"event-message","sessionId":"session-1","role":"system","type":"request_human","content":"Visitor requested a human response.","createdAt":"2026-07-23T15:00:00.123458"}}]`))
 		case "/rest/v1/rpc/takeoverAndReplyPortfolioChat":
-			_, _ = w.Write([]byte(`[{"outcome":"replied","status":"human","replyMessage":{"id":"reply-message","sessionId":"session-1","role":"assistant","type":"chat","content":"Admin reply","createdAt":"2026-07-23T15:00:00Z"}}]`))
+			_, _ = w.Write([]byte(`[{"outcome":"replied","status":"human","replyMessage":{"id":"reply-message","sessionId":"session-1","role":"assistant","type":"chat","content":"Admin reply","createdAt":"2026-07-23T15:00:00.123459"}}]`))
 		case "/rest/v1/rpc/prunePortfolioChatRetention":
 			_, _ = w.Write([]byte(`[{"messagesDeleted":3,"sessionsDeleted":2}]`))
 		default:

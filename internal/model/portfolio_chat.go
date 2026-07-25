@@ -318,6 +318,23 @@ type PortfolioChatExchangeResult struct {
 	AssistantMessage *PortfolioChatMessage `json:"assistantMessage"`
 }
 
+type portfolioChatExchangeResultRow struct {
+	Outcome          string                   `json:"outcome"`
+	UserMessage      *portfolioChatMessageRow `json:"userMessage"`
+	AssistantMessage *portfolioChatMessageRow `json:"assistantMessage"`
+}
+
+func portfolioChatMessageFromRow(row *portfolioChatMessageRow) (*PortfolioChatMessage, error) {
+	if row == nil {
+		return nil, nil
+	}
+	if timeFromString(row.CreatedAt).IsZero() {
+		return nil, fmt.Errorf("invalid portfolio chat message createdAt")
+	}
+	message := rowToPortfolioChatMessage(*row)
+	return &message, nil
+}
+
 type PortfolioChatRequestHumanInput struct {
 	SessionID      string
 	VisitorIDHash  string
@@ -341,6 +358,13 @@ type PortfolioChatMutationResult struct {
 	Status       string                `json:"status"`
 	EventMessage *PortfolioChatMessage `json:"eventMessage,omitempty"`
 	ReplyMessage *PortfolioChatMessage `json:"replyMessage,omitempty"`
+}
+
+type portfolioChatMutationResultRow struct {
+	Outcome      string                   `json:"outcome"`
+	Status       string                   `json:"status"`
+	EventMessage *portfolioChatMessageRow `json:"eventMessage,omitempty"`
+	ReplyMessage *portfolioChatMessageRow `json:"replyMessage,omitempty"`
 }
 
 type PortfolioChatRetentionResult struct {
@@ -378,14 +402,26 @@ func (m *PortfolioChatMessageModel) CompleteRun(ctx context.Context, input Portf
 		"userContent": input.UserContent, "assistantContent": input.AssistantContent, "modelName": input.ModelName,
 		"expiresAt": input.ExpiresAt.UTC(), "maxMessages": input.MaxMessages, "occurredAt": input.OccurredAt.UTC(),
 	}
-	var rows []PortfolioChatExchangeResult
+	var rows []portfolioChatExchangeResultRow
 	if _, err := m.api.request(ctx, http.MethodPost, "rpc/completePortfolioChatRun", nil, body, "", &rows); err != nil {
 		return nil, err
 	}
 	if len(rows) == 0 {
 		return nil, ErrNotFound
 	}
-	return &rows[0], nil
+	userMessage, err := portfolioChatMessageFromRow(rows[0].UserMessage)
+	if err != nil {
+		return nil, err
+	}
+	assistantMessage, err := portfolioChatMessageFromRow(rows[0].AssistantMessage)
+	if err != nil {
+		return nil, err
+	}
+	return &PortfolioChatExchangeResult{
+		Outcome:          rows[0].Outcome,
+		UserMessage:      userMessage,
+		AssistantMessage: assistantMessage,
+	}, nil
 }
 
 func (m *PortfolioChatMessageModel) ReleaseRun(ctx context.Context, sessionID, visitorIDHash, runID, leaseOwner string) error {
@@ -424,14 +460,27 @@ func (m *PortfolioChatSessionModel) TakeoverAndReply(ctx context.Context, input 
 }
 
 func (m *PortfolioChatSessionModel) callChatMutation(ctx context.Context, path string, body map[string]any) (*PortfolioChatMutationResult, error) {
-	var rows []PortfolioChatMutationResult
+	var rows []portfolioChatMutationResultRow
 	if _, err := m.api.request(ctx, http.MethodPost, path, nil, body, "", &rows); err != nil {
 		return nil, err
 	}
 	if len(rows) == 0 {
 		return nil, ErrNotFound
 	}
-	return &rows[0], nil
+	eventMessage, err := portfolioChatMessageFromRow(rows[0].EventMessage)
+	if err != nil {
+		return nil, err
+	}
+	replyMessage, err := portfolioChatMessageFromRow(rows[0].ReplyMessage)
+	if err != nil {
+		return nil, err
+	}
+	return &PortfolioChatMutationResult{
+		Outcome:      rows[0].Outcome,
+		Status:       rows[0].Status,
+		EventMessage: eventMessage,
+		ReplyMessage: replyMessage,
+	}, nil
 }
 
 func (m *PortfolioChatSessionModel) PruneRetention(ctx context.Context, maxMessages int, expiredBefore time.Time, batchSize int) (PortfolioChatRetentionResult, error) {
