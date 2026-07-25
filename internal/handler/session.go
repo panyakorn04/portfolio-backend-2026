@@ -5,6 +5,7 @@ import (
 	"strings"
 
 	"portfolio-backend/internal/auth"
+	"portfolio-backend/internal/observability"
 	"portfolio-backend/internal/response"
 	"portfolio-backend/internal/svc"
 )
@@ -111,7 +112,11 @@ func SessionLogoutHandler(svcCtx *svc.ServiceContext) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		rawToken := auth.GetCookieValue(r, auth.SessionCookieName)
 		if rawToken != "" && svcCtx.HasDatabse {
-			_ = svcCtx.Sessions.DeleteByTokenHash(r.Context(), auth.HashSessionToken(rawToken))
+			if err := svcCtx.Sessions.DeleteByTokenHash(r.Context(), auth.HashSessionToken(rawToken)); err != nil {
+				observability.Error(r.Context(), "admin_session.logout_revoke_failed", "Admin session logout revocation failed", err)
+				response.Error(w, http.StatusServiceUnavailable, "Unable to sign out right now.")
+				return
+			}
 		}
 		setSessionCookie(w, svcCtx, "", -1)
 		response.Ok(w, http.StatusOK, map[string]any{"authenticated": false})

@@ -29,7 +29,7 @@ func SendContactWebhook(svcCtx *svc.ServiceContext, payload any) bool {
 
 	req, err := http.NewRequest(http.MethodPost, url, bytes.NewReader(body))
 	if err != nil {
-		logx.Errorf("[contact] webhook request build failed: %v", err)
+		logx.Errorf("[contact] webhook request build failed; error_type=%T", err)
 		return false
 	}
 	req.Header.Set("Content-Type", "application/json")
@@ -39,7 +39,7 @@ func SendContactWebhook(svcCtx *svc.ServiceContext, payload any) bool {
 
 	resp, err := webhookClient.Do(req)
 	if err != nil {
-		logx.Errorf("[contact] webhook delivery failed: %v", err)
+		logx.Errorf("[contact] webhook delivery failed; error_type=%T", err)
 		return false
 	}
 	defer resp.Body.Close()

@@ -43,6 +43,9 @@ func main() {
 	runner := handler.NewStudioExecutionRunner(ctx)
 	runner.Start(context.Background())
 	defer runner.Close()
+	chatRetentionRunner := handler.NewPortfolioChatRetentionRunner(ctx)
+	chatRetentionRunner.Start(context.Background())
+	defer chatRetentionRunner.Close()
 
 	logx.Infow("portfolio API starting",
 		logx.Field("event", "service.starting"),

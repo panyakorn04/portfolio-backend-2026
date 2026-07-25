@@ -4,6 +4,7 @@ import (
 	"net/http"
 
 	"portfolio-backend/internal/auth"
+	"portfolio-backend/internal/observability"
 	"portfolio-backend/internal/response"
 	"portfolio-backend/internal/svc"
 )
@@ -69,10 +70,10 @@ func AdminLogoutEverywhereHandler(svcCtx *svc.ServiceContext) http.HandlerFunc {
 			return
 		}
 
-		currentRaw := auth.GetCookieValue(r, auth.SessionCookieName)
-		_ = svcCtx.Sessions.DeleteAllForUser(r.Context(), access.User.ID)
-		if currentRaw != "" {
-			_ = svcCtx.Sessions.DeleteByTokenHash(r.Context(), auth.HashSessionToken(currentRaw))
+		if err := svcCtx.Sessions.DeleteAllForUser(r.Context(), access.User.ID); err != nil {
+			observability.Error(r.Context(), "admin_session.logout_everywhere_revoke_failed", "Admin logout-everywhere revocation failed", err)
+			response.Error(w, http.StatusInternalServerError, "Unable to log out all sessions.")
+			return
 		}
 		setSessionCookie(w, svcCtx, "", -1)
 
