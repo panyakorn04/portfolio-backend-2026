@@ -3,8 +3,8 @@ module portfolio-backend
 go 1.26.5
 
 require (
-	github.com/redis/go-redis/v9 v9.21.0
-	github.com/zeromicro/go-zero v1.10.2
+	github.com/redis/go-redis/v9 v9.22.0
+	github.com/zeromicro/go-zero v1.10.3
 	golang.org/x/crypto v0.54.0
 	golang.org/x/image v0.44.0
 )
@@ -26,7 +26,7 @@ require (
 	github.com/mattn/go-isatty v0.0.20 // indirect
 	github.com/munnerz/goautoneg v0.0.0-20191010083416-a7dc8b61c822 // indirect
 	github.com/openzipkin/zipkin-go v0.4.3 // indirect
-	github.com/pelletier/go-toml/v2 v2.3.1 // indirect
+	github.com/pelletier/go-toml/v2 v2.4.3 // indirect
 	github.com/prometheus/client_golang v1.23.2 // indirect
 	github.com/prometheus/client_model v0.6.2 // indirect
 	github.com/prometheus/common v0.66.1 // indirect
